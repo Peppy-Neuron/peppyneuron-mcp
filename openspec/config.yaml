@@ -13,7 +13,8 @@ context: |
   every rule that could corrupt the experiment — is `Peppy-Neuron/neuron-server`.
   Nothing here enforces a rule. It carries a stimulus and it protects a machine.
 
-  Runtime: Node 20+ with TypeScript (strict mode)
+  Runtime: Node 22+ with TypeScript (strict mode). 22 is the lowest LTS still in
+    support; Node 20 reached end of life in April 2026
   Protocol: MCP over stdio, `@modelcontextprotocol/sdk`
   Distribution: npm, run as `npx -y peppyneuron-mcp`
   Transport to the server: HTTPS to `POST/GET {PEPPYNEURON_API_URL}/api/*`,

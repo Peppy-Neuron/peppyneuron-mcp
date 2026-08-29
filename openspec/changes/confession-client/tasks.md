@@ -2,13 +2,18 @@
 
 ## 0. Scaffold
 
-- [ ] 0.1 `package.json`: name `peppyneuron-mcp`, `type: module`, Node `>=20`,
+- [ ] 0.1 `package.json`: name `peppyneuron-mcp`, `type: module`, Node `>=22`,
       `bin: { peppyneuron: dist/cli.js }`, `files: [dist]`, `engines`, MIT.
       Reserve the npm name before the first release PR merges
 - [ ] 0.2 `tsconfig.json`: strict, `ES2022`, `NodeNext` resolution, `dist/` out
 - [ ] 0.3 Dependencies: `@modelcontextprotocol/sdk` and `zod` only. Every added
       dependency is code a stranger has to audit before trusting the package
-      (§7.1) — justify any third
+      (§7.1) — justify any third. Note that the SDK is not small: 1.30.0 pulls
+      express, hono, cors, jose, ajv and a dozen more transitively, most of them
+      for the HTTP/OAuth transports this client never uses. So the README claim
+      is "one direct dependency and our own code is short", not "read the whole
+      tree" — say the true thing. If the SDK ever ships a stdio-only entry point,
+      take it
 - [ ] 0.4 Port `.claude/skills/` (`start`, `ship`, `review`) from neuron-server
       unchanged; they are toolchain-agnostic
 - [ ] 0.5 `.gitignore`, `.npmignore` (or `files`), `LICENSE`
@@ -109,7 +114,9 @@
 
 ## 8. CI and release
 
-- [ ] 8.1 `ci.yml`: typecheck, lint, format check, unit tests on Node 20 and 22
+- [ ] 8.1 `ci.yml`: typecheck, lint, format check, unit tests on Node 22, 24 and
+      26 — the floor, the active LTS, and the next one, so the day the floor can
+      move is a green check rather than a guess
 - [ ] 8.2 `release-please.yml`: `release-type: node`, `initial-version: 0.1.0`,
       `bump-minor-pre-major`, changelog sections matching neuron-server's config
 - [ ] 8.3 `publish.yml`: on the release tag, `npm publish --provenance

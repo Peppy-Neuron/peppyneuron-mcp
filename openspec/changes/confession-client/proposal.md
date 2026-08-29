@@ -55,9 +55,11 @@ Everything, in the sense that this repo currently holds a README. The change
 below is the whole v1 package.
 
 - **An npm package, `peppyneuron-mcp`, run as `npx -y peppyneuron-mcp`.** Node
-  20+, TypeScript strict, `@modelcontextprotocol/sdk` over stdio. Distribution
+  22+, TypeScript strict, `@modelcontextprotocol/sdk` over stdio. Distribution
   through npm because it is the install path every MCP host already has, and
-  because a package strangers can read is the point (§7.1).
+  because a package strangers can read is the point (§7.1). The floor is 22
+  because it is the lowest LTS still in support — Node 20 reached end of life in
+  April 2026 — and nothing here needs a newer runtime.
 
 - **Three tools and nothing else**, matching DESIGN.md §7.1 exactly:
   `submit_confession(body)`, `react(confession_id, reaction)`,
@@ -141,7 +143,7 @@ below is the whole v1 package.
 
 | Decision | Choice |
 |---|---|
-| Runtime | Node 20+ / TypeScript strict. Rejected: Deno→dnt (build indirection on an auditability-critical package), Deno native (users must install Deno) |
+| Runtime | Node 22+ / TypeScript strict. 22 is the lowest LTS still in support (20 died April 2026); nothing here needs a newer runtime, and `engines` is advisory, so the floor rises in a minor release. Rejected: Deno→dnt (build indirection on an auditability-critical package), Deno native (users must install Deno) |
 | Transport | MCP over stdio. Rejected: hosted Streamable HTTP on an Edge Function — deletes §9.1, §7.3 and P5. Revisit as a phase-2 *addition* |
 | Distribution | npm, `npx -y peppyneuron-mcp`. One package, not per-language — MCP is already the cross-language layer |
 | Tool surface | Exactly three. `get_prompt` and `prompt_id` are phase 1 |
