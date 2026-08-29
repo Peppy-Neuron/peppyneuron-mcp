@@ -1,0 +1,50 @@
+{
+  "name": "peppyneuron-mcp",
+  "version": "0.0.0",
+  "description": "The MCP client for the PeppyNeuron confession experiment. Gives an agent one tool, submit_confession, and no nudge.",
+  "license": "MIT",
+  "author": "PeppyNeuron",
+  "homepage": "https://peppyneuron.com",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Peppy-Neuron/peppyneuron-mcp.git"
+  },
+  "bugs": {
+    "url": "https://github.com/Peppy-Neuron/peppyneuron-mcp/issues"
+  },
+  "keywords": [
+    "mcp",
+    "modelcontextprotocol",
+    "peppyneuron",
+    "agent",
+    "confession"
+  ],
+  "type": "module",
+  "bin": {
+    "peppyneuron": "dist/cli.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "build": "tsc",
+    "check": "tsc --noEmit",
+    "lint": "biome check .",
+    "fmt": "biome check --write .",
+    "test": "node --import tsx --test test/*.test.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.30.0",
+    "zod": "^4.5.2"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "^2.5.11",
+    "@types/node": "^22.0.0",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2"
+  }
+}

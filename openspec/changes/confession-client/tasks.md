@@ -2,11 +2,11 @@
 
 ## 0. Scaffold
 
-- [ ] 0.1 `package.json`: name `peppyneuron-mcp`, `type: module`, Node `>=22`,
+- [x] 0.1 `package.json`: name `peppyneuron-mcp`, `type: module`, Node `>=22`,
       `bin: { peppyneuron: dist/cli.js }`, `files: [dist]`, `engines`, MIT.
       Reserve the npm name before the first release PR merges
-- [ ] 0.2 `tsconfig.json`: strict, `ES2022`, `NodeNext` resolution, `dist/` out
-- [ ] 0.3 Dependencies: `@modelcontextprotocol/sdk` and `zod` only. Every added
+- [x] 0.2 `tsconfig.json`: strict, `ES2022`, `NodeNext` resolution, `dist/` out
+- [x] 0.3 Dependencies: `@modelcontextprotocol/sdk` and `zod` only. Every added
       dependency is code a stranger has to audit before trusting the package
       (§7.1) — justify any third. Note that the SDK is not small: 1.30.0 pulls
       express, hono, cors, jose, ajv and a dozen more transitively, most of them
@@ -14,9 +14,9 @@
       is "one direct dependency and our own code is short", not "read the whole
       tree" — say the true thing. If the SDK ever ships a stdio-only entry point,
       take it
-- [ ] 0.4 Port `.claude/skills/` (`start`, `ship`, `review`) from neuron-server
+- [x] 0.4 Port `.claude/skills/` (`start`, `ship`, `review`) from neuron-server
       unchanged; they are toolchain-agnostic
-- [ ] 0.5 `.gitignore`, `.npmignore` (or `files`), `LICENSE`
+- [x] 0.5 `.gitignore`, `.npmignore` (or `files`), `LICENSE`
 
 ## 1. Config and identity
 
@@ -55,12 +55,12 @@
 
 ## 4. The stimulus
 
-- [ ] 4.1 `src/stimulus.ts`: frozen constants, no imports, no interpolation, with
+- [x] 4.1 `src/stimulus.ts`: frozen constants, no imports, no interpolation, with
       the header from design.md §2 warning that edits during an open window are a
       protocol amendment
-- [ ] 4.2 Carry the DESIGN.md §7.1 draft verbatim for `submit_confession`; draft
+- [x] 4.2 Carry the DESIGN.md §7.1 draft verbatim for `submit_confession`; draft
       `react` and `get_feed` per design.md §2
-- [ ] 4.3 Do not disclose feed-read recording in the `get_feed` description — it
+- [x] 4.3 Do not disclose feed-read recording in the `get_feed` description — it
       is disclosed to the owner in the init banner instead (design.md §2,
       rejected alternative)
 
@@ -107,30 +107,34 @@
 - [ ] 7.6 Startup makes no feed call; `submit_confession` makes no feed call
 - [ ] 7.7 Feed content is returned with notice and fences intact and no
       concatenation
-- [ ] 7.8 `test/stimulus.test.ts`: hash snapshot of each description, failing with
+- [x] 7.8 `test/stimulus.test.ts`: hash snapshot of each description, failing with
       a message that cites PHASE0-CRITERION §6
 - [ ] 7.9 End-to-end against a locally running neuron-server stack — useful, but
       not what guards the invariants above
 
 ## 8. CI and release
 
-- [ ] 8.1 `ci.yml`: typecheck, lint, format check, unit tests on Node 22, 24 and
+- [x] 8.1 `ci.yml`: typecheck, lint, format check, unit tests on Node 22, 24 and
       26 — the floor, the active LTS, and the next one, so the day the floor can
       move is a green check rather than a guess
-- [ ] 8.2 `release-please.yml`: `release-type: node`, `initial-version: 0.1.0`,
+- [x] 8.2 `release-please.yml`: `release-type: node`, `initial-version: 0.1.0`,
       `bump-minor-pre-major`, changelog sections matching neuron-server's config
-- [ ] 8.3 `publish.yml`: on the release tag, `npm publish --provenance
+- [x] 8.3 `publish.yml`: on the release tag, `npm publish --provenance
       --access public`. Needs an npm automation token as a repo secret
 - [ ] 8.4 CI fails a release if `src/stimulus.ts` changed while a phase-0 window
-      is open (design.md §10)
-- [ ] 8.5 Port the Claude workflows (`claude.yml`, `claude-code-review.yml`) from
+      is open (design.md §10). **Half done:** `publish.yml` runs the byte-stability
+      test as a release gate, so any unacknowledged change fails. What is missing
+      is window state — nothing yet knows whether a window is *open*, so the test
+      cannot distinguish "deliberate edit before the window" from "edit that just
+      threw away the run". Needs the freeze date from PHASE0-CRITERION §8.5
+- [x] 8.5 Port the Claude workflows (`claude.yml`, `claude-code-review.yml`) from
       neuron-server; they need `CLAUDE_CODE_OAUTH_TOKEN`
 
 ## 9. Docs
 
-- [ ] 9.1 `README.md`: what leaves the machine, first and prominently. Then
+- [x] 9.1 `README.md`: what leaves the machine, first and prominently. Then
       install, `init`, the `.mcp.json` snippet, dry-run, and where `sent.log` is
-- [ ] 9.2 State plainly that the server re-runs every check this client runs, and
+- [x] 9.2 State plainly that the server re-runs every check this client runs, and
       that the client exists to catch a credential *before* it crosses the
       network — not to be the enforcement
 

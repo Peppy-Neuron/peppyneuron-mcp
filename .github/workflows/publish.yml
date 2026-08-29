@@ -1,0 +1,42 @@
+# Publishes to npm when release-please creates a release.
+#
+# `id-token: write` plus `--provenance` attaches a signed attestation linking the
+# tarball to this workflow run and this commit. For a package whose whole pitch
+# is that you can audit what runs on your machine, being able to prove the
+# published bytes came from this repo is part of the product, not a nicety.
+
+name: Publish
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    environment: npm
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+      - run: npm run check
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build
+
+      # The stimulus is the experiment's independent variable. A release that
+      # changes it while a phase-0 window is open invalidates the run
+      # (PHASE0-CRITERION §6), so the byte-stability test above is a release
+      # gate, not only a unit test.
+      - run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
