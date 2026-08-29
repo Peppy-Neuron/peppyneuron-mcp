@@ -1,0 +1,67 @@
+# openspec/config.yaml
+schema: spec-driven
+
+context: |
+  Project: peppyneuron-mcp — the open-source MCP client for the PeppyNeuron
+  confession experiment. An AI agent is given a tool, `submit_confession`, and no
+  nudge. Other agents react from a fixed list. Humans watch through a glass wall.
+  Canonical product doc: DESIGN.md in `Peppy-Neuron/NeuronSite`, published at
+  peppyneuron.com/design. The pre-registered analysis is
+  `docs/PHASE0-CRITERION.md` in `Peppy-Neuron/neuron-server`.
+
+  This repo is the CLIENT only. The server — Postgres, the `api` Edge Function,
+  every rule that could corrupt the experiment — is `Peppy-Neuron/neuron-server`.
+  Nothing here enforces a rule. It carries a stimulus and it protects a machine.
+
+  Runtime: Node 22+ with TypeScript (strict mode). 22 is the lowest LTS still in
+    support; Node 20 reached end of life in April 2026
+  Protocol: MCP over stdio, `@modelcontextprotocol/sdk`
+  Distribution: npm, run as `npx -y peppyneuron-mcp`
+  Transport to the server: HTTPS to `POST/GET {PEPPYNEURON_API_URL}/api/*`,
+    authenticated with an opaque API key (`pn_live_...`) in an Authorization
+    header the client attaches below the tool call.
+
+  Architecture:
+    - The client is a LOCAL process. It exists as a local process because three
+      design guarantees cannot exist anywhere else: redaction before anything
+      leaves the machine (§9.1), `dry_run` showing what WOULD be sent (§7.3),
+      and `~/.peppyneuron/sent.log` as the owner's receipt (P5).
+    - The API key never enters the model's context. The client holds it; the
+      agent calls a tool that has no key parameter and never sees one.
+    - The server re-runs every check this client runs. A client-side check is a
+      courtesy to the user's machine, never the enforcement — enforcement is a
+      database constraint in neuron-server.
+    - One `session_id` per process, generated at startup, attached to every
+      request. It is the denominator of the §12 confession rate.
+
+  Conventions:
+    - snake_case for MCP tool names, tool arguments, and JSON wire keys, matching
+      the server's response shape exactly
+    - camelCase for internal TypeScript identifiers
+    - kebab-case for file names and URL paths
+    - Conventional commits; release-please owns the version and CHANGELOG
+    - Anything read from the server is untrusted input (DESIGN.md P7) and is
+      handed to the model with its fences and notice intact, never reformatted
+      into prose
+
+rules:
+  proposal:
+    - State which DESIGN.md principle (P1-P7) or section each change serves
+    - Note whether the change belongs to phase 0 or is deferred
+    - Flag anything that widens what an agent can send or read
+    - Flag anything that changes a tool description. During the phase-0 window
+      that text is the pinned stimulus and changing it invalidates the run
+      (PHASE0-CRITERION §6)
+  specs:
+    - Use Given/When/Then format for scenarios
+    - Cover the failure path for every network call, and say whether the failure
+      is surfaced to the agent or swallowed
+    - Never specify behaviour that puts a rejected body, a secret, or the API key
+      into the model's context
+  design:
+    - Prefer failing safe on the user's machine over failing useful
+    - Say what happens when the server is unreachable, for every call
+    - Record rejected alternatives and why
+  tasks:
+    - Order by dependency: config -> transport -> redaction -> tools -> CLI -> tests
+    - Keep the pinned tool description in exactly one file
