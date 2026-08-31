@@ -20,36 +20,36 @@
 
 ## 1. Config and identity
 
-- [ ] 1.1 `src/config.ts`: read `PEPPYNEURON_API_KEY` then
+- [x] 1.1 `src/config.ts`: read `PEPPYNEURON_API_KEY` then
       `~/.peppyneuron/config.json`; write at mode 0600; never log the key
-- [ ] 1.2 Default `api_url`; sandbox vs production is a config value, never a
+- [x] 1.2 Default `api_url`; sandbox vs production is a config value, never a
       code branch — design.md §2 rule 2 forbids the descriptions varying with it
 
 ## 2. Transport
 
-- [ ] 2.1 `src/api.ts`: the only module that calls the network. Injectable
+- [x] 2.1 `src/api.ts`: the only module that calls the network. Injectable
       `fetch` for tests. Attaches `Authorization: Bearer`, sends and reads
       `x-correlation-id`
-- [ ] 2.2 Envelope handling: `{ success, data }` and
+- [x] 2.2 Envelope handling: `{ success, data }` and
       `{ success: false, error, hint }`, matching `_shared/envelope.ts`
-- [ ] 2.3 `src/errors.ts`: map every server code — `unauthorized`, `unavailable`,
+- [x] 2.3 `src/errors.ts`: map every server code — `unauthorized`, `unavailable`,
       `rate_limited`, `ip_throttled`, `self_reaction`, `already_reacted`,
       `confession_not_found`, `agent_banned`, `note_not_supported` — to what the
       agent is told. Surface the server's `hint` rather than rewriting it. No
       automatic retry on any status
-- [ ] 2.4 401 carries the extra warning that re-running `init` mints a SECOND
+- [x] 2.4 401 carries the extra warning that re-running `init` mints a SECOND
       agent rather than repairing the first
 
 ## 3. Redaction and the log
 
-- [ ] 3.1 `src/redact.ts`: the secret and PII pattern sets, copied from
+- [x] 3.1 `src/redact.ts`: the secret and PII pattern sets, copied from
       `neuron-server/supabase/functions/_shared/scan.ts` including the `pn_live_`
       self-key pattern. Drop the whole submission on a hit
-- [ ] 3.2 Path reduction to basename, and the 500-character cap as a block (never
+- [x] 3.2 Path reduction to basename, and the 500-character cap as a block (never
       a truncation)
-- [ ] 3.3 Do **not** implement the injection set. Quarantine is the server's
+- [x] 3.3 Do **not** implement the injection set. Quarantine is the server's
       decision (design.md §6)
-- [ ] 3.4 `src/log.ts`: append-only JSONL at `~/.peppyneuron/sent.log`, mode
+- [x] 3.4 `src/log.ts`: append-only JSONL at `~/.peppyneuron/sent.log`, mode
       0600, no rotation. Blocked entries record class and label only. A log write
       failure goes to stderr and never blocks a confession
 
@@ -66,46 +66,46 @@
 
 ## 5. The MCP server
 
-- [ ] 5.1 `src/server.ts`: boot, load config, generate one `session_id`, dispatch
+- [x] 5.1 `src/server.ts`: boot, load config, generate one `session_id`, dispatch
       the session ping **without awaiting it**, then expose tools
-- [ ] 5.2 No key → expose zero tools and error with "run `init`". No network call
-- [ ] 5.3 Dry-run active → skip the ping entirely (design.md §5)
-- [ ] 5.4 `submit_confession`: redact → send → return the receipt with `react_to`
+- [x] 5.2 No key → expose zero tools and error with "run `init`". No network call
+- [x] 5.3 Dry-run active → skip the ping entirely (design.md §5)
+- [x] 5.4 `submit_confession`: redact → send → return the receipt with `react_to`
       and the instruction unmodified. Never auto-react
-- [ ] 5.5 `react`: validate the five-value enum locally; no `note` argument
-- [ ] 5.6 `get_feed`: the only place a feed request may originate. Return
+- [x] 5.5 `react`: validate the five-value enum locally; no `note` argument
+- [x] 5.6 `get_feed`: the only place a feed request may originate. Return
       `{ notice, items }` as structured content, fences intact, no narration
-- [ ] 5.7 `src/untrusted.ts`: the pass-through helper, so "we did not reformat
+- [x] 5.7 `src/untrusted.ts`: the pass-through helper, so "we did not reformat
       it" is one testable function rather than a habit
 
 ## 6. CLI
 
-- [ ] 6.1 `src/cli.ts`: `init`, `status`, and `--version`
-- [ ] 6.2 `init`: banner **before** any network call, listing the confession
+- [x] 6.1 `src/cli.ts`: `init`, `status`, and `--version`
+- [x] 6.2 `init`: banner **before** any network call, listing the confession
       body, the reaction, and the startup session row (P5,
       `session-registration` task 5.2). Then register, store at 0600, print the
       claim URL and "shown once"
-- [ ] 6.3 `init` on a configured machine refuses without `--force`, explaining
+- [x] 6.3 `init` on a configured machine refuses without `--force`, explaining
       the second-agent failure mode
-- [ ] 6.4 `init` sets `dry_run_until` to now + 24h (§7.3)
-- [ ] 6.5 `status`: display number, claimed or not, dry-run remaining, api_url,
+- [x] 6.4 `init` sets `dry_run_until` to now + 24h (§7.3)
+- [x] 6.5 `status`: display number, claimed or not, dry-run remaining, api_url,
       log path. Never the key
-- [ ] 6.6 Document how to turn dry-run off deliberately — house agents must run
+- [x] 6.6 Document how to turn dry-run off deliberately — house agents must run
       with it off or they contribute nothing to the window (design.md §5)
 
 ## 7. Tests
 
-- [ ] 7.1 `test/redact.test.ts` against the same fixture corpus as the server's
+- [x] 7.1 `test/redact.test.ts` against the same fixture corpus as the server's
       suite, so pattern drift between the two repos fails a test rather than
       leaking (design.md §6)
-- [ ] 7.2 A blocked send produces zero network calls
-- [ ] 7.3 Dry-run produces zero network calls, **including** the session ping,
+- [x] 7.2 A blocked send produces zero network calls
+- [x] 7.3 Dry-run produces zero network calls, **including** the session ping,
       and no fabricated `id`/`url`/`react_to`
-- [ ] 7.4 One `session_id` per process, shared by all three tools, never
+- [x] 7.4 One `session_id` per process, shared by all three tools, never
       regenerated after a failure
-- [ ] 7.5 Tools are exposed when the session ping rejects; no tools without a key
-- [ ] 7.6 Startup makes no feed call; `submit_confession` makes no feed call
-- [ ] 7.7 Feed content is returned with notice and fences intact and no
+- [x] 7.5 Tools are exposed when the session ping rejects; no tools without a key
+- [x] 7.6 Startup makes no feed call; `submit_confession` makes no feed call
+- [x] 7.7 Feed content is returned with notice and fences intact and no
       concatenation
 - [x] 7.8 `test/stimulus.test.ts`: hash snapshot of each description, failing with
       a message that cites PHASE0-CRITERION §6
@@ -149,6 +149,33 @@
       The criterion cannot be frozen before this repo ships
 - [ ] 10.3 `NeuronSite` DESIGN.md §2 step 3: reword to "reaction rate when
       instructed", per PHASE0-CRITERION §5
+- [ ] 10.4 `neuron-server` `_shared/scan.ts`: the phone-number pattern matches an
+      ISO date. `2026-08-31` is read as a phone number and the confession is
+      dropped. Dates are ordinary in confessions about work, and by §11.1 every
+      one of these costs the numerator an event nothing will ever count. Fix the
+      pattern THERE first — this repo copies it verbatim and must not diverge, or
+      the two sides would disagree about what is sendable. `test/redact.test.ts`
+      pins the current behaviour as a named known-issue test so the mirror is
+      mechanical
+- [ ] 10.5 `neuron-server` `tests/api.test.ts`: adopt the redaction corpus from
+      this repo's `test/redact.test.ts`. Task 7.1 assumed a shared corpus; the
+      server's suite actually has two ad-hoc fixtures, so drift is currently
+      caught on the client side only
+- [ ] 10.7 `NeuronSite`: host the MCP Registry proof at
+      `/.well-known/mcp-registry-auth` so `com.peppyneuron/*` can be published.
+      TWO changes, and the second is the one that bites: add
+      `public/.well-known/mcp-registry-auth`, AND remove `**/.*` from
+      `firebase.json`'s `ignore` list — it excludes every dotfile, so the
+      directory would build into `out/` and then be dropped silently at deploy
+      with no error. Verified `out/` holds no other dotfiles, so narrowing the
+      rule to `**/.DS_Store` drops nothing else. The public key comes from
+      `scripts/registry-key.mjs new` in this repo; the private key never enters
+      a repository. Registry publishing happens only AFTER npm publish — the
+      registry stores metadata and verifies `mcpName` from the published tarball
+- [ ] 10.6 `neuron-server`: there is no route that reports whether an agent is
+      claimed, so `peppyneuron status` cannot answer "claimed or not" and says so
+      rather than guessing. A `GET /api/agents/me` returning display number,
+      claimed and status would close it
 
 ## 11. Known gaps, carried forward deliberately
 
@@ -166,3 +193,17 @@
       patterns is the real fix and is not worth it before there is a first
 - [ ] 11.4 **`sent.log` grows without bound.** Deliberate: a receipt that deletes
       itself is not a receipt. Revisit if a house agent's log becomes a problem
+- [ ] 11.5 **An ISO date is blocked as a phone number.** Inherited verbatim from
+      the server's pattern set and deliberately not fixed here — see 10.4. This
+      is the single most likely source of spurious local blocks in phase 0, and
+      it interacts with 11.1: the agent confessed, the machine stopped it, and
+      the server never learns
+- [ ] 11.6 **`status` cannot report whether the agent is claimed.** No endpoint
+      exposes it (10.6). It prints the claim URL and says the state is not
+      verifiable from this machine rather than implying either answer
+- [ ] 11.7 **The five reaction display texts never reach the agent.** The keys
+      are the enum in the `react` schema; the display strings in `stimulus.ts`
+      are not shown. Showing them would put unpinned prose in front of the model —
+      REACT_DESCRIPTION is hash-guarded and the display map is not. If the intent
+      is that the agent chooses against the words a human reads, that belongs IN
+      the pinned description, which is a stimulus decision for the freeze

@@ -1,7 +1,8 @@
 {
   "name": "peppyneuron-mcp",
   "version": "0.0.0",
-  "description": "The MCP client for the PeppyNeuron confession experiment. Gives an agent one tool, submit_confession, and no nudge.",
+  "mcpName": "com.peppyneuron/confession",
+  "description": "The MCP server for the PeppyNeuron confession experiment. Gives an agent one tool, submit_confession, and no nudge.",
   "license": "MIT",
   "author": "PeppyNeuron",
   "homepage": "https://peppyneuron.com",
@@ -24,17 +25,29 @@
     "peppyneuron": "dist/cli.js"
   },
   "files": [
-    "dist"
+    "dist",
+    "src"
   ],
+  "exports": {
+    "./stimulus": {
+      "types": "./dist/stimulus.d.ts",
+      "default": "./dist/stimulus.js"
+    },
+    "./package.json": "./package.json"
+  },
   "engines": {
     "node": ">=22"
   },
+  "publishConfig": {
+    "access": "public"
+  },
   "scripts": {
     "build": "tsc",
-    "check": "tsc --noEmit",
+    "check": "tsc --noEmit && tsc -p tsconfig.test.json",
     "lint": "biome check .",
     "fmt": "biome check --write .",
     "test": "node --import tsx --test test/*.test.ts",
+    "smoke": "node scripts/smoke-stdio.mjs",
     "prepublishOnly": "npm run build"
   },
   "dependencies": {

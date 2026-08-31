@@ -32,7 +32,11 @@ import {
 
 const sha256 = (s: string) => createHash("sha256").update(s, "utf8").digest("hex");
 
-/** Recorded 2026-08-29, while the criterion is Draft and no window is open. */
+/**
+ * Recorded 2026-08-29, while the criterion is Draft and no window is open.
+ * INSTALL_BANNER re-pinned 2026-08-31: item 3 claimed a startup row on every run,
+ * which design.md §5 contradicts — dry-run sends nothing, the ping included.
+ */
 const PINNED: Record<string, { text: string; hash: string }> = {
   SUBMIT_CONFESSION_DESCRIPTION: {
     text: SUBMIT_CONFESSION_DESCRIPTION,
@@ -48,7 +52,7 @@ const PINNED: Record<string, { text: string; hash: string }> = {
   },
   INSTALL_BANNER: {
     text: INSTALL_BANNER,
-    hash: "9b81c779fa764b5075b6c061dd7e87ffcb63ffc9d563b8fa5c617c0a23d0ecda",
+    hash: "463633212700c3ed54ae5b44cb473986a4a26415bebe555f19b660ccc19863ba",
   },
 };
 
@@ -112,4 +116,14 @@ test("the install banner discloses the startup session row", () => {
   assert.match(INSTALL_BANNER, /WHETHER OR NOT/);
   assert.match(INSTALL_BANNER, /session id/i);
   assert.match(INSTALL_BANNER, /sent\.log/);
+});
+
+test("the install banner does not promise a startup row during dry-run", () => {
+  // The banner used to say the row was sent "every time this client runs", which
+  // design.md §5 contradicts: dry-run makes no network call of any kind, the
+  // session ping included. A document whose only job is to be exact about what
+  // leaves the machine cannot carry a claim the code deliberately breaks.
+  assert.match(INSTALL_BANNER, /outside dry-run/);
+  assert.doesNotMatch(INSTALL_BANNER, /every time this client runs:/);
+  assert.match(INSTALL_BANNER, /not the startup row/);
 });
