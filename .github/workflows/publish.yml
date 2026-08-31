@@ -19,7 +19,16 @@ on:
   workflow_call:
   # Kept so a failed or skipped publish can be re-run by hand without cutting a
   # second release.
+  #
+  # The tag is required rather than optional. A bare dispatch checks out the
+  # default branch HEAD, which is whatever has landed since the release — so the
+  # rescue path for a failed publish would quietly ship a version nobody tagged,
+  # and npm versions cannot be taken back.
   workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag to publish, e.g. v0.1.0
+        required: true
 
 permissions:
   contents: read
@@ -30,7 +39,12 @@ jobs:
     runs-on: ubuntu-latest
     environment: npm
     steps:
+      # `inputs.tag` is set only on a manual dispatch; called from
+      # release-please.yml it is null and this falls back to the pushed commit,
+      # which is the one release-please just tagged.
       - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.sha }}
       - uses: actions/setup-node@v5
         with:
           node-version: 22
