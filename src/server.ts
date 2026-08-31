@@ -341,7 +341,16 @@ export const buildServer = (opts: BuildOptions): BuiltServer => {
   // flag on every session and destroy the primary result.
   server.registerTool(
     "get_feed",
-    { description: GET_FEED_DESCRIPTION, inputSchema: { limit: z.number().int().optional() } },
+    {
+      description: GET_FEED_DESCRIPTION,
+      // Bounded to the range rpc.feed already clamps to
+      // (`least(greatest(coalesce(p_limit, 10), 1), 25)`), for the same reason
+      // the react enum is validated here as well as in the database: an agent
+      // that read the description never meets an error it could not have
+      // predicted. A bound is a constraint, not prose — it adds no text the
+      // model reads, so it is not unpinned stimulus.
+      inputSchema: { limit: z.number().int().min(1).max(25).optional() },
+    },
     async ({ limit }) => {
       if (dryRun()) {
         appendLog({

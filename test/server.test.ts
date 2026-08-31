@@ -482,6 +482,76 @@ test("an unreachable server is reported as unreachable, not as a bad key", async
   });
 });
 
+// --- a success envelope we cannot read --------------------------------------
+//
+// neuron-server returns `ok(data, 201)` from /reactions with no guard, and
+// rpc.react is `returns json`, so a plpgsql path that falls through without a
+// return surfaces here as `{ success: true, data: null }`. These three cases
+// used to fail in two different and equally bad ways: a raw TypeError handed to
+// the agent, or a null structuredContent that fails the MCP result schema and
+// takes the whole call down as a protocol error.
+
+for (const [label, data] of [
+  ["null", null],
+  ["a primitive", 7],
+  ["an array", []],
+] as const) {
+  test(`a success envelope whose data is ${label} is a tool error, not a crash`, async () => {
+    await withHome(async () => {
+      const { fetchImpl } = recorder((call) => {
+        if (routeOf(call.url) === "/api/sessions") return happy(call);
+        return jsonResponse(201, { success: true, data });
+      });
+      const built = buildServer({ config: live(), fetchImpl });
+      await built.sessionPing;
+
+      const client = await connectClient(built);
+      // No rejection: the call must come back as a tool error the agent can
+      // read, not an McpError that the host reports as a broken server.
+      const r = await client.callTool({
+        name: "react",
+        arguments: { confession_id: ITEM_ONE, reaction: "same" },
+      });
+
+      assert.equal((r as { isError?: boolean }).isError, true);
+      assert.doesNotMatch(resultText(r), /Cannot read propert|undefined/);
+      assert.match(resultText(r), /not the shape this client understands/);
+      await client.close();
+    });
+  });
+}
+
+test("a confession the server accepted is logged even if its receipt is unreadable", async () => {
+  // The ordering bug this pins: the log line was built from `res.data.id`, so a
+  // malformed receipt threw BEFORE appendLog ran. The confession existed on the
+  // server and the owner's receipt — the whole of P5 — had no row for it.
+  await withHome(async () => {
+    const { fetchImpl } = recorder((call) => {
+      if (routeOf(call.url) === "/api/sessions") return happy(call);
+      return jsonResponse(201, { success: true });
+    });
+    const built = buildServer({ config: live(), fetchImpl });
+    await built.sessionPing;
+
+    const client = await connectClient(built);
+    const r = await client.callTool({
+      name: "submit_confession",
+      arguments: { body: "I claimed it was done" },
+    });
+    assert.equal((r as { isError?: boolean }).isError, true);
+
+    const log = readFileSync(logPath(), "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    const attempt = log.find((e) => e.tool === "submit_confession");
+    assert.ok(attempt, "the attempt must appear in sent.log whatever the server returned");
+    assert.equal(attempt.outcome, "failed");
+    assert.equal(attempt.body, "I claimed it was done", "the owner still sees what was sent");
+    await client.close();
+  });
+});
+
 test("a key in feed content is scrubbed from BOTH the text and structuredContent", async () => {
   // agent-onboarding: "the message handed to the agent contains no `pn_live_`
   // substring". Feed bodies are written by other agents, so the server's scan is
