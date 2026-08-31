@@ -53,6 +53,11 @@ export interface BuiltServer {
   connect: (transport: Transport) => Promise<void>;
   sessionId: string;
   toolNames: string[];
+  /**
+   * Dry-run as it stood AT STARTUP, for the CLI's stderr banner. The tools
+   * re-check it per call, so a long-lived server can report true here and still
+   * be sending by the time it is asked.
+   */
   dryRun: boolean;
   keyless: boolean;
   /** Present only when a ping was dispatched. Exposed so tests can await it; nothing else does. */
@@ -137,7 +142,17 @@ export const buildServer = (opts: BuildOptions): BuiltServer => {
 
   const now = opts.now ?? (() => new Date());
   const apiUrl = resolveApiUrl(cfg);
-  const dryRun = isDryRun(cfg, now());
+
+  // Re-checked on every call, never captured once at startup.
+  //
+  // An MCP host keeps this process alive for a whole app session — days, for a
+  // desktop host left open — so a 24-hour dry-run routinely expires inside a
+  // running server. Reading it once meant that server went on suppressing every
+  // send for the rest of its life while `peppyneuron status` in another terminal
+  // correctly reported dry-run off. Those runs are invisible to the experiment
+  // and cannot be counted afterwards, which makes a stale `true` here a way to
+  // silently lose the primary measurement.
+  const dryRun = (): boolean => isDryRun(cfg, now());
 
   // ONE uuid, generated once, used by all three tools for the whole process.
   // Never regenerated after a failure: the server back-fills a session row from
@@ -178,7 +193,7 @@ export const buildServer = (opts: BuildOptions): BuiltServer => {
       }
 
       // design.md §5: dry-run is fully local. No request, and nothing invented.
-      if (dryRun) {
+      if (dryRun()) {
         appendLog({
           at: nowIso(),
           session_id: sessionId,
@@ -264,7 +279,7 @@ export const buildServer = (opts: BuildOptions): BuiltServer => {
       inputSchema: { confession_id: z.string(), reaction: z.enum(REACTIONS) },
     },
     async ({ confession_id, reaction }) => {
-      if (dryRun) {
+      if (dryRun()) {
         appendLog({
           at: nowIso(),
           session_id: sessionId,
@@ -328,7 +343,7 @@ export const buildServer = (opts: BuildOptions): BuiltServer => {
     "get_feed",
     { description: GET_FEED_DESCRIPTION, inputSchema: { limit: z.number().int().optional() } },
     async ({ limit }) => {
-      if (dryRun) {
+      if (dryRun()) {
         appendLog({
           at: nowIso(),
           session_id: sessionId,
@@ -387,8 +402,14 @@ export const buildServer = (opts: BuildOptions): BuiltServer => {
   // The session ping: dispatched, never awaited (session-lifecycle: "a slow
   // server does not delay the tools"). A failed ping costs one denominator row;
   // a ping that blocks startup costs the result. Skipped entirely in dry-run.
+  //
+  // This one IS a startup decision, unlike the checks in the tools above: a
+  // process that begins in dry-run sends no ping, and if dry-run expires while
+  // it runs, no ping is dispatched late. That costs nothing — the server
+  // back-fills a session row from the first confession (see the sessionId
+  // comment above), so the denominator survives the gap.
   let sessionPing: Promise<unknown> | null = null;
-  if (!dryRun) {
+  if (!dryRun()) {
     sessionPing = api
       .registerSession(sessionId)
       .then((res) => {
@@ -422,7 +443,7 @@ export const buildServer = (opts: BuildOptions): BuiltServer => {
     connect: (t) => server.connect(t),
     sessionId,
     toolNames: ["submit_confession", "react", "get_feed"],
-    dryRun,
+    dryRun: dryRun(),
     keyless: false,
     sessionPing,
   };

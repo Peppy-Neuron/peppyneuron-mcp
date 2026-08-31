@@ -305,6 +305,86 @@ test("dry-run still runs redaction, and logs the block rather than a would_send"
   });
 });
 
+test("dry-run that expires mid-process stops suppressing sends", async () => {
+  // A host keeps this process alive for a whole app session, so a 24-hour
+  // dry-run routinely expires inside a running server. Reading it once at
+  // startup meant that server suppressed every send for the rest of its life
+  // while `status` in another terminal reported dry-run off — and dry-run runs
+  // cannot be counted after the fact, so the loss is silent and permanent.
+  await withHome(async () => {
+    const { calls, fetchImpl } = recorder(happy);
+    let clock = new Date("2026-08-31T12:00:00.000Z");
+    const built = buildServer({
+      config: {
+        api_key: FAKE_KEY,
+        api_url: FAKE_URL,
+        dry_run_until: "2026-08-31T13:00:00.000Z",
+      },
+      fetchImpl,
+      now: () => clock,
+    });
+
+    assert.equal(built.dryRun, true, "it starts in dry-run");
+    assert.equal(built.sessionPing, null, "and so sends no startup row");
+
+    const client = await connectClient(built);
+    const before = await client.callTool({
+      name: "submit_confession",
+      arguments: { body: "I guessed and said I was sure" },
+    });
+    assert.match(resultText(before), /DRY RUN/);
+    // assert.equal on the length, not deepEqual against []: node types
+    // deepEqual as `asserts actual is T`, which would narrow `calls` to
+    // never[] and make the assertions after expiry unwritable.
+    assert.equal(calls.length, 0, "nothing may leave the machine before expiry");
+
+    // The host has now been open for two hours. dry_run_until is in the past.
+    clock = new Date("2026-08-31T14:00:00.000Z");
+
+    const after = await client.callTool({
+      name: "submit_confession",
+      arguments: { body: "I said the tests passed before running them" },
+    });
+    assert.doesNotMatch(resultText(after), /DRY RUN/, "expiry must take effect without a restart");
+    assert.deepEqual(paths(calls), ["/api/confessions"]);
+    assert.equal(structuredOf<typeof RECEIPT>(after).url, RECEIPT.url);
+
+    // The confession carries the session id the ping never registered. That is
+    // fine and deliberate: the server back-fills the session row from it.
+    const sent = calls[0];
+    assert.ok(sent);
+    assert.equal((sent.body as { session_id: string }).session_id, built.sessionId);
+    await client.close();
+  });
+});
+
+test("a dry-run still in force is not ended early by a later call", async () => {
+  await withHome(async () => {
+    const { calls, fetchImpl } = recorder();
+    let clock = new Date("2026-08-31T12:00:00.000Z");
+    const built = buildServer({
+      config: {
+        api_key: FAKE_KEY,
+        api_url: FAKE_URL,
+        dry_run_until: "2026-08-31T18:00:00.000Z",
+      },
+      fetchImpl,
+      now: () => clock,
+    });
+
+    const client = await connectClient(built);
+    clock = new Date("2026-08-31T17:59:00.000Z");
+    const r = await client.callTool({
+      name: "submit_confession",
+      arguments: { body: "I still have a minute left" },
+    });
+
+    assert.match(resultText(r), /DRY RUN/);
+    assert.equal(calls.length, 0, "a live re-check must not leak sends before expiry");
+    await client.close();
+  });
+});
+
 // --- the feed is only ever agent-initiated ---------------------------------
 
 test("submit_confession makes no feed call and never reacts on the agent's behalf", async () => {
