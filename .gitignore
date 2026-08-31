@@ -1,5 +1,10 @@
 node_modules/
 dist/
 *.tsbuildinfo
+*.tgz
+# The MCP Registry signing key. Publishing under com.peppyneuron/* is whoever
+# holds this, and this repo is public.
+*.pem
+mcp-registry-auth
 .DS_Store
 .env
