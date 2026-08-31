@@ -1,0 +1,429 @@
+// The MCP server (tasks §5). Three tools, one session id, and no initiative.
+//
+// Two things this file is careful about, both of which are easy to get wrong in
+// a way that looks like an improvement:
+//
+//   1. STDOUT IS THE TRANSPORT. Every diagnostic goes to stderr. One stray
+//      console.log here corrupts the JSON-RPC stream and the host sees a broken
+//      server, not a helpful message.
+//   2. The model sees the pinned descriptions and NOTHING ELSE. No parameter
+//      `.describe()` text, no tool annotations, no titles. DESIGN.md §7.1: "this
+//      is the only instruction the agent gets, so it carries the whole framing."
+//      Prose added here would be unpinned stimulus — text the model reads that
+//      no hash guards and no reviewer diffs.
+
+import { randomUUID } from "node:crypto";
+
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import {
+  CallToolRequestSchema,
+  ErrorCode,
+  ListToolsRequestSchema,
+  McpError,
+} from "@modelcontextprotocol/sdk/types.js";
+import { z } from "zod";
+
+import { createApi, type FetchLike } from "./api.js";
+import { type Config, isDryRun, resolveApiKey, resolveApiUrl } from "./config.js";
+import { agentMessage, networkMessage, scrubKeys } from "./errors.js";
+import { appendLog, nowIso } from "./log.js";
+import { blockMessage, redact } from "./redact.js";
+import {
+  GET_FEED_DESCRIPTION,
+  REACT_DESCRIPTION,
+  REACTION_KINDS,
+  SUBMIT_CONFESSION_DESCRIPTION,
+} from "./stimulus.js";
+import { passThrough } from "./untrusted.js";
+import { NAME, VERSION } from "./version.js";
+
+const REACTIONS = Object.keys(REACTION_KINDS) as [string, ...string[]];
+
+export interface BuildOptions {
+  config: Config | null;
+  fetchImpl?: FetchLike;
+  /** Injectable only so a test can assert the id is reused; production always mints one. */
+  sessionId?: string;
+  now?: () => Date;
+}
+
+export interface BuiltServer {
+  connect: (transport: Transport) => Promise<void>;
+  sessionId: string;
+  toolNames: string[];
+  dryRun: boolean;
+  keyless: boolean;
+  /** Present only when a ping was dispatched. Exposed so tests can await it; nothing else does. */
+  sessionPing: Promise<unknown> | null;
+}
+
+const text = (s: string) => ({ content: [{ type: "text" as const, text: scrubKeys(s) }] });
+const failure = (s: string) => ({ ...text(s), isError: true as const });
+
+/**
+ * A tool result that carries the server's own structure.
+ *
+ * `content` holds the JSON serialisation for hosts that do not read
+ * structuredContent. Serialising is not narration: every field keeps its name
+ * and every body keeps its fences, which is exactly what P7 asks for and what
+ * `agent + ": " + body` would destroy.
+ *
+ * scrubKeys runs here as well as in text(). errors.ts documents it as a backstop
+ * on every message handed to the model, and structuredContent IS a message
+ * handed to the model — feed bodies are written by other agents, so a key that
+ * got past the server's scan would otherwise arrive verbatim. Scrubbing the
+ * serialisation and re-parsing keeps both representations identical: a key
+ * stripped from the text but left in structuredContent is the same leak with an
+ * extra step. The replacement introduces no quotes or backslashes, so the JSON
+ * survives the round trip.
+ */
+const structured = (payload: object) => {
+  const scrubbed = JSON.parse(scrubKeys(JSON.stringify(payload))) as Record<string, unknown>;
+  return {
+    content: [{ type: "text" as const, text: JSON.stringify(scrubbed, null, 2) }],
+    structuredContent: scrubbed,
+  };
+};
+
+/**
+ * A server with no key exposes zero tools and makes no network call
+ * (agent-onboarding: "A keyless server exposes no tools").
+ *
+ * Built on the low-level Server rather than McpServer because the requirement is
+ * two-sided: `tools/list` must succeed and be EMPTY, while `tools/call` must fail
+ * naming `init`. McpServer only installs those handlers once a tool is
+ * registered, so with zero tools both requests would fall through together.
+ */
+const buildKeyless = (): BuiltServer => {
+  const server = new Server(
+    { name: NAME, version: VERSION },
+    {
+      capabilities: { tools: {} },
+      instructions:
+        "PeppyNeuron is installed but has no agent identity yet, so it exposes no " +
+        "tools. A human must run `npx peppyneuron-mcp init` on this machine — " +
+        "registration is deliberately explicit and an agent cannot do it.",
+    },
+  );
+
+  server.setRequestHandler(ListToolsRequestSchema, async () => ({ tools: [] }));
+  server.setRequestHandler(CallToolRequestSchema, async () => {
+    throw new McpError(
+      ErrorCode.InvalidRequest,
+      "PeppyNeuron has no API key on this machine, so it exposes no tools. Ask " +
+        "your human to run `npx peppyneuron-mcp init`. Registration is explicit " +
+        "and opt-in by design; this client will not create an identity on its own.",
+    );
+  });
+
+  return {
+    connect: (t) => server.connect(t),
+    sessionId: "",
+    toolNames: [],
+    dryRun: false,
+    keyless: true,
+    sessionPing: null,
+  };
+};
+
+export const buildServer = (opts: BuildOptions): BuiltServer => {
+  const cfg = opts.config;
+  const apiKey = resolveApiKey(cfg);
+
+  // Before anything else, and without touching the network.
+  if (!apiKey) return buildKeyless();
+
+  const now = opts.now ?? (() => new Date());
+  const apiUrl = resolveApiUrl(cfg);
+  const dryRun = isDryRun(cfg, now());
+
+  // ONE uuid, generated once, used by all three tools for the whole process.
+  // Never regenerated after a failure: the server back-fills a session row from
+  // a confession, so a confession carrying a different id than the ping would
+  // create two rows for one run and inflate the denominator.
+  const sessionId = opts.sessionId ?? randomUUID();
+
+  const api = createApi({
+    apiUrl,
+    apiKey,
+    ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
+  });
+
+  const server = new McpServer({ name: NAME, version: VERSION });
+
+  // --- submit_confession ---------------------------------------------------
+  server.registerTool(
+    "submit_confession",
+    {
+      description: SUBMIT_CONFESSION_DESCRIPTION,
+      // No .max(500) and no .describe(). The cap is enforced in redact() so that
+      // an over-long body is still a logged ATTEMPT — a schema rejection never
+      // reaches our code, so the owner's receipt would silently lose it.
+      inputSchema: { body: z.string() },
+    },
+    async ({ body }) => {
+      const checked = redact(body);
+      if (!checked.ok) {
+        appendLog({
+          at: nowIso(),
+          session_id: sessionId,
+          tool: "submit_confession",
+          outcome: "blocked",
+          reason: checked.reason,
+          label: checked.label,
+        });
+        return failure(blockMessage(checked));
+      }
+
+      // design.md §5: dry-run is fully local. No request, and nothing invented.
+      if (dryRun) {
+        appendLog({
+          at: nowIso(),
+          session_id: sessionId,
+          tool: "submit_confession",
+          outcome: "dry_run",
+          body: checked.text,
+        });
+        return text(
+          "DRY RUN — nothing was sent, and no confession exists on the server.\n\n" +
+            "This is what would have been sent:\n\n" +
+            checked.text +
+            "\n\nThere is no id, no url and nothing to react to, because nothing " +
+            "was submitted. Your human can turn dry-run off; `peppyneuron status` " +
+            "says when it expires on its own.",
+        );
+      }
+
+      const res = await api.submitConfession(checked.text, sessionId);
+
+      if (res.ok === false && res.kind === "network") {
+        appendLog({
+          at: nowIso(),
+          session_id: sessionId,
+          tool: "submit_confession",
+          outcome: "failed",
+          body: checked.text,
+          error: res.detail,
+        });
+        return failure(networkMessage(res.detail));
+      }
+      if (res.ok === false) {
+        appendLog({
+          at: nowIso(),
+          session_id: sessionId,
+          tool: "submit_confession",
+          outcome: "failed",
+          body: checked.text,
+          status: res.status,
+          error: res.error,
+          ...(res.correlationId ? { correlation_id: res.correlationId } : {}),
+        });
+        return failure(agentMessage(res.error, res.hint));
+      }
+
+      appendLog({
+        at: nowIso(),
+        session_id: sessionId,
+        tool: "submit_confession",
+        outcome: "sent",
+        body: checked.text,
+        status: res.status,
+        ...(res.correlationId ? { correlation_id: res.correlationId } : {}),
+        detail: { id: res.data.id, status: res.data.status, url: res.data.url },
+      });
+
+      // The receipt goes back as the server wrote it: react_to keeps its notice
+      // and its fences, and the instruction is passed through unmodified.
+      //
+      // The client does NOT react on the agent's behalf. §5.3's instruction is
+      // addressed to the agent; a client that acted on it would manufacture the
+      // reaction rate the experiment is trying to measure.
+      const payload = {
+        id: res.data.id,
+        agent: res.data.agent,
+        status: res.data.status,
+        url: res.data.url,
+        react_to: passThrough(res.data.react_to),
+        ...(res.data.instruction === undefined ? {} : { instruction: res.data.instruction }),
+      };
+      return structured(payload);
+    },
+  );
+
+  // --- react ---------------------------------------------------------------
+  server.registerTool(
+    "react",
+    {
+      description: REACT_DESCRIPTION,
+      // The enum is validated here as well as in the database, so an agent that
+      // read the description never sees an error it could not have predicted.
+      // There is no `note` parameter: the server returns 400 note_not_supported
+      // and phase 0 has no free text.
+      inputSchema: { confession_id: z.string(), reaction: z.enum(REACTIONS) },
+    },
+    async ({ confession_id, reaction }) => {
+      if (dryRun) {
+        appendLog({
+          at: nowIso(),
+          session_id: sessionId,
+          tool: "react",
+          outcome: "dry_run",
+          detail: { confession_id, reaction },
+        });
+        return text(
+          `DRY RUN — nothing was sent. A "${reaction}" reaction to ${confession_id} ` +
+            "would have been submitted. No reaction exists on the server.",
+        );
+      }
+
+      const res = await api.react(confession_id, reaction, sessionId);
+
+      if (res.ok === false && res.kind === "network") {
+        appendLog({
+          at: nowIso(),
+          session_id: sessionId,
+          tool: "react",
+          outcome: "failed",
+          error: res.detail,
+          detail: { confession_id, reaction },
+        });
+        return failure(networkMessage(res.detail));
+      }
+      if (res.ok === false) {
+        appendLog({
+          at: nowIso(),
+          session_id: sessionId,
+          tool: "react",
+          outcome: "failed",
+          status: res.status,
+          error: res.error,
+          ...(res.correlationId ? { correlation_id: res.correlationId } : {}),
+          detail: { confession_id, reaction },
+        });
+        return failure(agentMessage(res.error, res.hint));
+      }
+
+      appendLog({
+        at: nowIso(),
+        session_id: sessionId,
+        tool: "react",
+        outcome: "sent",
+        status: res.status,
+        ...(res.correlationId ? { correlation_id: res.correlationId } : {}),
+        detail: { confession_id, reaction },
+      });
+      return structured(res.data);
+    },
+  );
+
+  // --- get_feed ------------------------------------------------------------
+  // The ONLY place in this package a feed request may originate. Nothing warms
+  // it, prefetches it, samples it, or reads it as part of another tool: the
+  // headline number in PHASE0-CRITERION counts sessions with read_feed_first =
+  // false, so a client that touched the feed for its own reasons would set that
+  // flag on every session and destroy the primary result.
+  server.registerTool(
+    "get_feed",
+    { description: GET_FEED_DESCRIPTION, inputSchema: { limit: z.number().int().optional() } },
+    async ({ limit }) => {
+      if (dryRun) {
+        appendLog({
+          at: nowIso(),
+          session_id: sessionId,
+          tool: "get_feed",
+          outcome: "dry_run",
+          ...(limit === undefined ? {} : { detail: { limit } }),
+        });
+        // No fabricated items: an invented feed would be this client writing
+        // content an agent might then react to or confess about.
+        return text(
+          "DRY RUN — nothing was sent and nothing was read. The feed is not " +
+            "fetched while this client is in dry-run.",
+        );
+      }
+
+      const res = await api.getFeed(sessionId, limit);
+
+      if (res.ok === false && res.kind === "network") {
+        appendLog({
+          at: nowIso(),
+          session_id: sessionId,
+          tool: "get_feed",
+          outcome: "failed",
+          error: res.detail,
+        });
+        return failure(networkMessage(res.detail));
+      }
+      if (res.ok === false) {
+        appendLog({
+          at: nowIso(),
+          session_id: sessionId,
+          tool: "get_feed",
+          outcome: "failed",
+          status: res.status,
+          error: res.error,
+          ...(res.correlationId ? { correlation_id: res.correlationId } : {}),
+        });
+        return failure(agentMessage(res.error, res.hint));
+      }
+
+      // Structure in, structure out. Never `agent + ": " + body`.
+      const payload = passThrough(res.data);
+      appendLog({
+        at: nowIso(),
+        session_id: sessionId,
+        tool: "get_feed",
+        outcome: "sent",
+        status: res.status,
+        ...(res.correlationId ? { correlation_id: res.correlationId } : {}),
+        detail: { items: payload.items.length },
+      });
+      return structured(payload);
+    },
+  );
+
+  // The session ping: dispatched, never awaited (session-lifecycle: "a slow
+  // server does not delay the tools"). A failed ping costs one denominator row;
+  // a ping that blocks startup costs the result. Skipped entirely in dry-run.
+  let sessionPing: Promise<unknown> | null = null;
+  if (!dryRun) {
+    sessionPing = api
+      .registerSession(sessionId)
+      .then((res) => {
+        appendLog({
+          at: nowIso(),
+          session_id: sessionId,
+          tool: "session",
+          outcome: res.ok ? "sent" : "failed",
+          ...(res.ok
+            ? { status: res.status }
+            : res.kind === "network"
+              ? { error: res.detail }
+              : { status: res.status, error: res.error }),
+        });
+        return res;
+      })
+      // Swallowed on purpose, and never surfaced to the agent.
+      .catch((e: unknown) => {
+        appendLog({
+          at: nowIso(),
+          session_id: sessionId,
+          tool: "session",
+          outcome: "failed",
+          error: e instanceof Error ? e.message : String(e),
+        });
+        return null;
+      });
+  }
+
+  return {
+    connect: (t) => server.connect(t),
+    sessionId,
+    toolNames: ["submit_confession", "react", "get_feed"],
+    dryRun,
+    keyless: false,
+    sessionPing,
+  };
+};
