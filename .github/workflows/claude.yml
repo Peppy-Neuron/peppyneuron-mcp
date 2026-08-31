@@ -12,24 +12,46 @@ on:
 
 jobs:
   claude:
-    # This repo is public, so the author guard is load-bearing. `issue_comment`
-    # runs in the BASE repo context and receives secrets no matter who commented,
-    # which means without this any GitHub user could spend this repo's
-    # CLAUDE_CODE_OAUTH_TOKEN by typing `@claude` on an issue. Fork-PR secret
-    # withholding does not help here — that only covers `pull_request`.
+    # This repo is public, so the guard is load-bearing: `issue_comment` runs in
+    # the BASE repo context and receives secrets no matter who commented, so
+    # without it any GitHub user could spend CLAUDE_CODE_OAUTH_TOKEN by typing
+    # `@claude` on an issue. Fork-PR secret withholding does not cover that path.
+    #
+    # Two accepted proofs, because neither alone is sufficient here:
+    #
+    #   author_association     catches the owner, outside collaborators and
+    #                          PUBLIC org members — but not private ones. GitHub
+    #                          reports a private member as CONTRIBUTOR or NONE in
+    #                          webhook payloads while the REST API answers MEMBER
+    #                          for the same person, which is exactly how the first
+    #                          version of this guard locked out a repo admin and
+    #                          skipped every review without saying so.
+    #
+    #   CLAUDE_ALLOWED_ACTORS  a repository variable holding a JSON array of
+    #                          logins, for the people the first proof cannot see.
+    #                          Editable without touching this file:
+    #                            gh variable set CLAUDE_ALLOWED_ACTORS \
+    #                              --body '["some-login"]'
+    #
+    # An unset variable is the empty string and fromJSON rejects that, so the
+    # `|| '[]'` fallback is load-bearing rather than defensive.
     if: |
       (github.event_name == 'issue_comment' &&
         contains(github.event.comment.body, '@claude') &&
-        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+        (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) ||
+         contains(fromJSON(vars.CLAUDE_ALLOWED_ACTORS || '[]'), github.event.comment.user.login))) ||
       (github.event_name == 'pull_request_review_comment' &&
         contains(github.event.comment.body, '@claude') &&
-        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) ||
+        (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association) ||
+         contains(fromJSON(vars.CLAUDE_ALLOWED_ACTORS || '[]'), github.event.comment.user.login))) ||
       (github.event_name == 'pull_request_review' &&
         contains(github.event.review.body, '@claude') &&
-        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association)) ||
+        (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.review.author_association) ||
+         contains(fromJSON(vars.CLAUDE_ALLOWED_ACTORS || '[]'), github.event.review.user.login))) ||
       (github.event_name == 'issues' &&
         (contains(github.event.issue.body, '@claude') || contains(github.event.issue.title, '@claude')) &&
-        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association))
+        (contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.issue.author_association) ||
+         contains(fromJSON(vars.CLAUDE_ALLOWED_ACTORS || '[]'), github.event.issue.user.login)))
     runs-on: ubuntu-latest
     permissions:
       contents: read

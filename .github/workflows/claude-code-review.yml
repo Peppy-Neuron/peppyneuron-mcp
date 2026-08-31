@@ -12,9 +12,16 @@ on:
 
 jobs:
   claude-review:
-    # Fork PRs get no secrets, so an outside PR would start this job and fail on
-    # a missing token. Skipping is quieter than a red X on every drive-by PR.
-    if: contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
+    # The thing worth testing is "is this a fork?", so test that, not the author.
+    # A fork PR gets no secrets, so it would start this job and fail on a missing
+    # token; skipping is quieter than a red X on every drive-by PR.
+    #
+    # This deliberately does NOT use author_association. That field is unreliable
+    # here: this org's memberships are private, and GitHub reports a private
+    # member as CONTRIBUTOR or NONE in webhook payloads even while the REST API
+    # answers MEMBER for the same person. Guarding on it skipped the review for a
+    # repo admin, silently, on every pull request.
+    if: github.event.pull_request.head.repo.full_name == github.repository
     # Optional: Filter by PR author
     # if: |
     #   github.event.pull_request.user.login == 'external-contributor' ||
