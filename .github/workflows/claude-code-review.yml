@@ -12,6 +12,9 @@ on:
 
 jobs:
   claude-review:
+    # Fork PRs get no secrets, so an outside PR would start this job and fail on
+    # a missing token. Skipping is quieter than a red X on every drive-by PR.
+    if: contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.pull_request.author_association)
     # Optional: Filter by PR author
     # if: |
     #   github.event.pull_request.user.login == 'external-contributor' ||

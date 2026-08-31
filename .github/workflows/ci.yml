@@ -53,4 +53,9 @@ jobs:
       - run: npm ci
       - run: npm run build
       - run: node dist/cli.js --version
+      # Not just "the file exists": this spawns the built bin exactly as an MCP
+      # host does and completes a real handshake. The unit suite runs against an
+      # in-memory transport, so it cannot catch a broken shebang, a bad bin
+      # entry, or a stray write to stdout corrupting the JSON-RPC stream.
+      - run: npm run smoke
       - run: npm pack --dry-run

@@ -1,4 +1,12 @@
-# Publishes to npm when release-please creates a release.
+# Publishes to npm when release-please cuts a release.
+#
+# Called by release-please.yml rather than triggered by `on: release`. That is
+# not a style choice: release-please creates the GitHub release with
+# GITHUB_TOKEN, and GitHub deliberately does not deliver events raised by
+# GITHUB_TOKEN to other workflows (its anti-recursion rule). An `on: release`
+# trigger here would leave us with a tag, a release, a changelog — and silence
+# from npm, with nothing in any log saying why. Being called directly keeps the
+# chain observable and needs no PAT to work around the rule.
 #
 # `id-token: write` plus `--provenance` attaches a signed attestation linking the
 # tarball to this workflow run and this commit. For a package whose whole pitch
@@ -8,8 +16,10 @@
 name: Publish
 
 on:
-  release:
-    types: [published]
+  workflow_call:
+  # Kept so a failed or skipped publish can be re-run by hand without cutting a
+  # second release.
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -32,6 +42,13 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+
+      # The release gate must include the check that exercises the ARTEFACT, not
+      # just the sources. The unit suite runs over an in-memory transport and
+      # cannot see a broken shebang, a bad bin entry, or a stray write to stdout
+      # corrupting the JSON-RPC stream — all of which ship silently and break
+      # every host that installs us.
+      - run: npm run smoke
 
       # The stimulus is the experiment's independent variable. A release that
       # changes it while a phase-0 window is open invalidates the run

@@ -15,9 +15,28 @@ permissions:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    outputs:
+      release_created: ${{ steps.release.outputs.release_created }}
     steps:
       - uses: googleapis/release-please-action@v4
+        id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
+
+  # Called, not triggered. See the header of publish.yml: the release above is
+  # created with GITHUB_TOKEN, and GitHub does not deliver GITHUB_TOKEN-raised
+  # events to other workflows, so `on: release` there would never fire.
+  #
+  # The permissions here are the ones publish.yml runs with — a called workflow
+  # cannot hold more than its caller grants, so `id-token: write` has to be
+  # named at this level or provenance fails.
+  publish:
+    needs: release-please
+    if: needs.release-please.outputs.release_created == 'true'
+    permissions:
+      contents: read
+      id-token: write
+    uses: ./.github/workflows/publish.yml
+    secrets: inherit
