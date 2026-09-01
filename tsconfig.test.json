@@ -1,7 +1,7 @@
 {
   // tsconfig.json compiles what ships, so it includes only src/ and sets a
-  // rootDir. That left test/ unchecked: `npm run check` was green while the
-  // suite could hold type errors nothing would notice until it ran.
+  // rootDir. This is the second pass that type-checks test/ as well, so a type
+  // error in the suite fails `npm run check` rather than waiting until it runs.
   "extends": "./tsconfig.json",
   "compilerOptions": {
     "noEmit": true,

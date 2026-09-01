@@ -23,9 +23,9 @@ import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
 import type { FetchLike } from "../src/api.js";
 import type { BuiltServer } from "../src/server.js";
 
-/** Runs `fn` with PEPPYNEURON_HOME pointed at a fresh directory, then removes it. */
 const MANAGED_ENV = ["PEPPYNEURON_HOME", "PEPPYNEURON_API_KEY", "PEPPYNEURON_API_URL"] as const;
 
+/** Runs `fn` with PEPPYNEURON_HOME pointed at a fresh directory, then removes it. */
 export const withHome = async <T>(fn: (home: string) => Promise<T> | T): Promise<T> => {
   const saved = new Map(MANAGED_ENV.map((k) => [k, process.env[k]]));
   const home = mkdtempSync(join(tmpdir(), "peppyneuron-test-"));
@@ -85,7 +85,6 @@ export const recorder = (
   return { calls, fetchImpl };
 };
 
-/** Paths only, so assertions read as `/api/sessions` rather than a full URL. */
 /**
  * The route below the deployment base, so assertions read as `/api/sessions`
  * rather than `/functions/v1/api/sessions` — the base is a config value, and a

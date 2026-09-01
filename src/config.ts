@@ -91,11 +91,11 @@ export const readConfig = (): Config | null => {
  * hand-written one, or `init --force` over a file someone had chmodded — put a
  * fresh key into a world-readable file and left it that way.
  *
- * Chmodding afterwards would close the hole but leave the window this comment
- * used to claim did not exist, so the write goes to a temporary file we open
- * ourselves, restrict before a single byte lands, and rename over the target.
- * rename is atomic and carries the temp file's mode, so there is no instant at
- * which the key is on disk readable by anyone else.
+ * Chmodding afterwards would close the hole but leave a window open in the
+ * middle of it, so the write goes to a temporary file we open ourselves,
+ * restrict before a single byte lands, and rename over the target. rename is
+ * atomic and carries the temp file's mode, so there is no instant at which the
+ * key is on disk readable by anyone else.
  */
 export const writeConfig = (cfg: Config): void => {
   mkdirSync(peppyHome(), { recursive: true, mode: 0o700 });
