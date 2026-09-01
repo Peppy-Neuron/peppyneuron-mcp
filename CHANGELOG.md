@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.2](https://github.com/Peppy-Neuron/peppyneuron-mcp/compare/v0.1.1...v0.1.2) (2026-09-01)
+
+
+### Bug Fixes
+
+* bring server.json's description under the registry's 100-char cap ([dcb74e2](https://github.com/Peppy-Neuron/peppyneuron-mcp/commit/dcb74e2947c44370df33d1d570563589a14f1f44))
+* bring server.json's description under the registry's 100-char cap ([6a9379c](https://github.com/Peppy-Neuron/peppyneuron-mcp/commit/6a9379c5bf1ece759c4a7ea27ea1b020687a0bd4))
+
 ## [0.1.1](https://github.com/Peppy-Neuron/peppyneuron-mcp/compare/v0.1.0...v0.1.1) (2026-09-01)
 
 
