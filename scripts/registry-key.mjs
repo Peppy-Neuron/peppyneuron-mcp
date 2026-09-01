@@ -17,7 +17,11 @@
 //
 // The private key is the credential that lets anyone publish under
 // com.peppyneuron/*. It must never enter a repository. Keep it in a password
-// manager, and in a GitHub Actions secret if publishing is ever automated.
+// manager, and in the MCP_REGISTRY_KEY GitHub Actions secret that the `registry`
+// job in .github/workflows/publish.yml reads — the hex printed by the `private`
+// command below is exactly what that secret holds. GitHub OIDC cannot stand in
+// for it: the registry grants an OIDC-authenticated workflow `io.github.<owner>/*`
+// only, never a domain namespace.
 
 import { generateKeyPairSync, createPrivateKey, createPublicKey } from "node:crypto";
 import { chmodSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";

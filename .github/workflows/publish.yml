@@ -100,3 +100,75 @@ jobs:
       - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+  # The MCP Registry listing — how hosts actually discover this server.
+  #
+  # A separate job rather than more steps on `publish`, for two reasons: a
+  # registry failure must not read as a failed npm release (by the time this
+  # runs the npm version is already out and cannot be taken back), and this
+  # half can then be re-run on its own.
+  #
+  # It exists because the listing does NOT follow npm on its own. Every release
+  # so far — 0.1.1, 0.1.2, 0.1.3 — left the registry pointing at the previous
+  # version until someone remembered to run `mcp-publisher publish` by hand,
+  # with nothing anywhere reporting the gap. Hosts install the version the
+  # registry names, so the silent failure mode is that discovery serves a
+  # version older than the one we just shipped.
+  registry:
+    needs: publish
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ inputs.tag || github.sha }}
+
+      # Pinned. An unpinned installer choosing what may publish under our own
+      # namespace is the wrong thing to leave floating.
+      - name: Install mcp-publisher
+        env:
+          PUBLISHER_VERSION: v1.8.1
+        run: |
+          curl -fsSL "https://github.com/modelcontextprotocol/registry/releases/download/${PUBLISHER_VERSION}/mcp-publisher_linux_amd64.tar.gz" \
+            | tar -xz mcp-publisher
+          ./mcp-publisher --version
+
+      # The registry rejects a version it already holds, so a re-run of a
+      # release whose npm half failed would otherwise fail here too and hide
+      # which half actually needs attention.
+      - name: Skip if this version is already listed
+        id: listed
+        run: |
+          want="$(jq -r .version server.json)"
+          have="$(curl -fsS "https://registry.modelcontextprotocol.io/v0/servers?search=com.peppyneuron/confession" \
+                  | jq -r --arg v "$want" '[.servers[]? | select(.server.version == $v)] | length' || echo 0)"
+          if [ "${have:-0}" -gt 0 ]; then
+            echo "com.peppyneuron/confession $want is already listed; nothing to do."
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Domain auth, not GitHub OIDC. The registry grants `io.github.<owner>/*`
+      # to a workflow authenticating by OIDC (internal/api/handlers/v0/auth/
+      # github_oidc.go), and our namespace is `com.peppyneuron/*` — proved by the
+      # Ed25519 key whose public half is served at
+      # peppyneuron.com/.well-known/mcp-registry-auth. So OIDC cannot publish
+      # this server no matter what permissions the job holds, and the private
+      # key has to be a secret. scripts/registry-key.mjs anticipates exactly
+      # this; `registry-key.mjs private <pem>` prints the hex this expects.
+      #
+      # That key is the credential for publishing anything under
+      # com.peppyneuron/*. It is never written to disk here and never echoed:
+      # the login token it mints is short-lived, which is why login runs on
+      # every release rather than once.
+      - name: Publish to the MCP Registry
+        if: steps.listed.outputs.skip == 'false'
+        env:
+          MCP_REGISTRY_KEY: ${{ secrets.MCP_REGISTRY_KEY }}
+        run: |
+          if [ -z "$MCP_REGISTRY_KEY" ]; then
+            echo "MCP_REGISTRY_KEY is not set — the registry listing will fall behind npm." >&2
+            exit 1
+          fi
+          ./mcp-publisher login http --domain peppyneuron.com --private-key "$MCP_REGISTRY_KEY"
+          ./mcp-publisher publish
