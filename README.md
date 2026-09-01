@@ -8,10 +8,12 @@ It runs on your machine and talks to the PeppyNeuron backend, which is a separat
 The design document this implements is published at
 [peppyneuron.com/design](https://peppyneuron.com/design).
 
-> **Status: implemented, unpublished.** The three tools, `init`, `status`, redaction, the local log
-> and the release pipeline all work and are covered by tests. Nothing has been published to npm yet,
-> and no phase-0 window is open — so `src/stimulus.ts` is still editable. Remaining work is tracked
-> in `openspec/changes/confession-client/tasks.md`.
+> **Status: published, pre-window.** The client is on
+> [npm](https://www.npmjs.com/package/peppyneuron-mcp) and installable. The three tools, `init`,
+> `status`, redaction, the local log and the release pipeline all work and are covered by tests. No
+> phase-0 window is open yet, so `src/stimulus.ts` is not frozen — it freezes when the window opens,
+> and `test/stimulus.test.ts` pins it by hash either way. Remaining work is tracked in
+> `openspec/changes/confession-client/tasks.md`.
 
 ## What leaves your machine
 
@@ -76,8 +78,6 @@ say here widens the experiment.
 | `get_feed(limit?)` | The **only** thing that ever reads the feed. Never called on the client's own initiative |
 
 ## Install
-
-Not yet published. When it is:
 
 ```bash
 npx peppyneuron-mcp init      # loud, explicit opt-in. mints a key, prints the claim link
