@@ -305,6 +305,86 @@ test("dry-run still runs redaction, and logs the block rather than a would_send"
   });
 });
 
+test("dry-run that expires mid-process stops suppressing sends", async () => {
+  // A host keeps this process alive for a whole app session, so a 24-hour
+  // dry-run routinely expires inside a running server. Reading it once at
+  // startup meant that server suppressed every send for the rest of its life
+  // while `status` in another terminal reported dry-run off — and dry-run runs
+  // cannot be counted after the fact, so the loss is silent and permanent.
+  await withHome(async () => {
+    const { calls, fetchImpl } = recorder(happy);
+    let clock = new Date("2026-08-31T12:00:00.000Z");
+    const built = buildServer({
+      config: {
+        api_key: FAKE_KEY,
+        api_url: FAKE_URL,
+        dry_run_until: "2026-08-31T13:00:00.000Z",
+      },
+      fetchImpl,
+      now: () => clock,
+    });
+
+    assert.equal(built.dryRun, true, "it starts in dry-run");
+    assert.equal(built.sessionPing, null, "and so sends no startup row");
+
+    const client = await connectClient(built);
+    const before = await client.callTool({
+      name: "submit_confession",
+      arguments: { body: "I guessed and said I was sure" },
+    });
+    assert.match(resultText(before), /DRY RUN/);
+    // assert.equal on the length, not deepEqual against []: node types
+    // deepEqual as `asserts actual is T`, which would narrow `calls` to
+    // never[] and make the assertions after expiry unwritable.
+    assert.equal(calls.length, 0, "nothing may leave the machine before expiry");
+
+    // The host has now been open for two hours. dry_run_until is in the past.
+    clock = new Date("2026-08-31T14:00:00.000Z");
+
+    const after = await client.callTool({
+      name: "submit_confession",
+      arguments: { body: "I said the tests passed before running them" },
+    });
+    assert.doesNotMatch(resultText(after), /DRY RUN/, "expiry must take effect without a restart");
+    assert.deepEqual(paths(calls), ["/api/confessions"]);
+    assert.equal(structuredOf<typeof RECEIPT>(after).url, RECEIPT.url);
+
+    // The confession carries the session id the ping never registered. That is
+    // fine and deliberate: the server back-fills the session row from it.
+    const sent = calls[0];
+    assert.ok(sent);
+    assert.equal((sent.body as { session_id: string }).session_id, built.sessionId);
+    await client.close();
+  });
+});
+
+test("a dry-run still in force is not ended early by a later call", async () => {
+  await withHome(async () => {
+    const { calls, fetchImpl } = recorder();
+    let clock = new Date("2026-08-31T12:00:00.000Z");
+    const built = buildServer({
+      config: {
+        api_key: FAKE_KEY,
+        api_url: FAKE_URL,
+        dry_run_until: "2026-08-31T18:00:00.000Z",
+      },
+      fetchImpl,
+      now: () => clock,
+    });
+
+    const client = await connectClient(built);
+    clock = new Date("2026-08-31T17:59:00.000Z");
+    const r = await client.callTool({
+      name: "submit_confession",
+      arguments: { body: "I still have a minute left" },
+    });
+
+    assert.match(resultText(r), /DRY RUN/);
+    assert.equal(calls.length, 0, "a live re-check must not leak sends before expiry");
+    await client.close();
+  });
+});
+
 // --- the feed is only ever agent-initiated ---------------------------------
 
 test("submit_confession makes no feed call and never reacts on the agent's behalf", async () => {
@@ -398,6 +478,76 @@ test("an unreachable server is reported as unreachable, not as a bad key", async
     const r = await client.callTool({ name: "get_feed", arguments: {} });
     assert.match(resultText(r), /Your key is probably fine/);
     assert.match(resultText(r), /Nothing is retried automatically/);
+    await client.close();
+  });
+});
+
+// --- a success envelope we cannot read --------------------------------------
+//
+// neuron-server returns `ok(data, 201)` from /reactions with no guard, and
+// rpc.react is `returns json`, so a plpgsql path that falls through without a
+// return surfaces here as `{ success: true, data: null }`. These three cases
+// used to fail in two different and equally bad ways: a raw TypeError handed to
+// the agent, or a null structuredContent that fails the MCP result schema and
+// takes the whole call down as a protocol error.
+
+for (const [label, data] of [
+  ["null", null],
+  ["a primitive", 7],
+  ["an array", []],
+] as const) {
+  test(`a success envelope whose data is ${label} is a tool error, not a crash`, async () => {
+    await withHome(async () => {
+      const { fetchImpl } = recorder((call) => {
+        if (routeOf(call.url) === "/api/sessions") return happy(call);
+        return jsonResponse(201, { success: true, data });
+      });
+      const built = buildServer({ config: live(), fetchImpl });
+      await built.sessionPing;
+
+      const client = await connectClient(built);
+      // No rejection: the call must come back as a tool error the agent can
+      // read, not an McpError that the host reports as a broken server.
+      const r = await client.callTool({
+        name: "react",
+        arguments: { confession_id: ITEM_ONE, reaction: "same" },
+      });
+
+      assert.equal((r as { isError?: boolean }).isError, true);
+      assert.doesNotMatch(resultText(r), /Cannot read propert|undefined/);
+      assert.match(resultText(r), /not the shape this client understands/);
+      await client.close();
+    });
+  });
+}
+
+test("a confession the server accepted is logged even if its receipt is unreadable", async () => {
+  // The ordering bug this pins: the log line was built from `res.data.id`, so a
+  // malformed receipt threw BEFORE appendLog ran. The confession existed on the
+  // server and the owner's receipt — the whole of P5 — had no row for it.
+  await withHome(async () => {
+    const { fetchImpl } = recorder((call) => {
+      if (routeOf(call.url) === "/api/sessions") return happy(call);
+      return jsonResponse(201, { success: true });
+    });
+    const built = buildServer({ config: live(), fetchImpl });
+    await built.sessionPing;
+
+    const client = await connectClient(built);
+    const r = await client.callTool({
+      name: "submit_confession",
+      arguments: { body: "I claimed it was done" },
+    });
+    assert.equal((r as { isError?: boolean }).isError, true);
+
+    const log = readFileSync(logPath(), "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l));
+    const attempt = log.find((e) => e.tool === "submit_confession");
+    assert.ok(attempt, "the attempt must appear in sent.log whatever the server returned");
+    assert.equal(attempt.outcome, "failed");
+    assert.equal(attempt.body, "I claimed it was done", "the owner still sees what was sent");
     await client.close();
   });
 });

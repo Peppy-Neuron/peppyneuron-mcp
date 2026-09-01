@@ -10,7 +10,15 @@
 //      environment would mean development runs and window runs are different
 //      experiments, which design.md §2 rule 2 forbids.
 
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  closeSync,
+  fchmodSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  renameSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -75,13 +83,38 @@ export const readConfig = (): Config | null => {
 };
 
 /**
- * Writes the config with the key in it, so both the directory and the file are
- * created restricted rather than created and then tightened — a window in which
- * a key sits world-readable is a window, however short.
+ * Writes the config with the key in it, at mode 0600 — including when the file
+ * already exists.
+ *
+ * `writeFileSync`'s `mode` option is honoured only when the call CREATES the
+ * file. Writing straight to a config.json that was already there at 0644 — a
+ * hand-written one, or `init --force` over a file someone had chmodded — put a
+ * fresh key into a world-readable file and left it that way.
+ *
+ * Chmodding afterwards would close the hole but leave the window this comment
+ * used to claim did not exist, so the write goes to a temporary file we open
+ * ourselves, restrict before a single byte lands, and rename over the target.
+ * rename is atomic and carries the temp file's mode, so there is no instant at
+ * which the key is on disk readable by anyone else.
  */
 export const writeConfig = (cfg: Config): void => {
   mkdirSync(peppyHome(), { recursive: true, mode: 0o700 });
-  writeFileSync(configPath(), `${JSON.stringify(cfg, null, 2)}\n`, { mode: 0o600 });
+
+  const target = configPath();
+  const tmp = `${target}.tmp`;
+
+  // 'w' rather than 'wx': a crash between open and rename would otherwise leave
+  // a stale temp file that blocks every future write. fchmod covers the case
+  // that permits — a stale temp left behind with looser permissions — and it
+  // runs before the write, so the umask cannot widen the result either.
+  const fd = openSync(tmp, "w", 0o600);
+  try {
+    fchmodSync(fd, 0o600);
+    writeFileSync(fd, `${JSON.stringify(cfg, null, 2)}\n`);
+  } finally {
+    closeSync(fd);
+  }
+  renameSync(tmp, target);
 };
 
 /**

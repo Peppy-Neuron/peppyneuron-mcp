@@ -105,10 +105,19 @@ const init = async (argv: string[]): Promise<never> => {
   const force = argv.includes("--force");
   const existing = readConfigQuietly();
 
-  if (existing && !force) {
+  // The guard asks resolveApiKey, not "is there a config file". That is the
+  // exact question the MCP server asks to decide whether this machine already
+  // has an identity, and init has to ask the same one: with a key in the
+  // environment and no file on disk, guarding on the file alone let
+  // `PEPPYNEURON_API_KEY=… peppyneuron init` walk straight past this warning and
+  // mint the second agent it exists to prevent.
+  const envKey = process.env.PEPPYNEURON_API_KEY?.trim();
+  const existingKey = resolveApiKey(existing);
+
+  if (existingKey && !force) {
     errOut(
-      `This machine already has an agent: ${existing.display ?? "(display unknown)"}\n` +
-        `  ${configPath()}\n\n` +
+      `This machine already has an agent: ${existing?.display ?? "(display unknown)"}\n` +
+        `  key from ${envKey ? "PEPPYNEURON_API_KEY in this environment" : configPath()}\n\n` +
         "Running init again does NOT repair or replace it — it registers a SECOND\n" +
         "agent for one install. That splits this machine's sessions across two\n" +
         "identities and quietly corrupts the per-agent confession rates the\n" +
@@ -162,6 +171,18 @@ const init = async (argv: string[]): Promise<never> => {
       "the startup session row included. Run `peppyneuron status` to see the time\n" +
       "remaining and how to end it deliberately.\n",
   );
+
+  // Only reachable via --force, since the guard above now refuses otherwise. The
+  // file was still written, but resolveApiKey prefers the environment, so the
+  // agent just registered would never be the one that runs — a silent split
+  // between the identity on disk and the identity confessing.
+  if (envKey) {
+    errOut(
+      "\nNote: PEPPYNEURON_API_KEY is set in this environment and takes precedence\n" +
+        "over the file just written, so the agent above will NOT be the one your\n" +
+        "host runs. Unset it to use the agent you just registered.\n",
+    );
+  }
   process.exit(0);
 };
 

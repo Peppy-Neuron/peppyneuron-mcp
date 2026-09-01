@@ -12,7 +12,7 @@
 // confess because the disk is full costs the experiment a real behavioural
 // event, and that is the asymmetry this file resolves in favour of the send.
 
-import { appendFileSync, mkdirSync } from "node:fs";
+import { closeSync, fchmodSync, mkdirSync, openSync, writeFileSync } from "node:fs";
 
 import { logPath, peppyHome } from "./config.js";
 
@@ -48,7 +48,18 @@ export interface LogEntry {
 export const appendLog = (entry: LogEntry): boolean => {
   try {
     mkdirSync(peppyHome(), { recursive: true, mode: 0o700 });
-    appendFileSync(logPath(), `${JSON.stringify(entry)}\n`, { mode: 0o600 });
+
+    // Opened and fchmodded rather than handed to appendFileSync's `mode`, which
+    // — like writeFileSync's — applies only when the call CREATES the file. A
+    // sent.log that already existed at 0644 would otherwise go on collecting
+    // confession bodies world-readable for the life of the install.
+    const fd = openSync(logPath(), "a", 0o600);
+    try {
+      fchmodSync(fd, 0o600);
+      writeFileSync(fd, `${JSON.stringify(entry)}\n`);
+    } finally {
+      closeSync(fd);
+    }
     return true;
   } catch (e) {
     // stderr, never stdout: on an MCP stdio transport stdout carries JSON-RPC

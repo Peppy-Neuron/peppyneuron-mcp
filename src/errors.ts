@@ -16,9 +16,16 @@
  * contain the marker even in redacted form. This runs on every message handed
  * to the model, as a backstop rather than as the primary defence — the primary
  * defence is that the key is never put into a message in the first place.
+ *
+ * The prefix is matched the way redact.ts matches it — any `pn_<env>_`, not
+ * `pn_live_` alone. The two files scan for the same credential and disagreeing
+ * about its shape means a sandbox key is refused on the way out but printed
+ * back on the way in. The trailing run stays `*` rather than redact's `{16,}`
+ * because this side must also catch the bare `pn_live_...` that neuron-server's
+ * own 401 hint contains.
  */
 export const scrubKeys = (text: string): string =>
-  text.replace(/pn_live_[A-Za-z0-9_-]*/g, "[redacted]");
+  text.replace(/\bpn_[A-Za-z0-9]+_[A-Za-z0-9_-]*/g, "[redacted]");
 
 /**
  * The one place the client says more than the server did.
