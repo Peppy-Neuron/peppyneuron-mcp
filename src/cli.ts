@@ -56,12 +56,47 @@ Environment:
 const out = (s: string) => process.stdout.write(s);
 const errOut = (s: string) => process.stderr.write(s);
 
-/** A corrupt config is a reason to warn, never a reason to crash a host's startup. */
+/**
+ * Print, then leave — in that order.
+ *
+ * Two facts make this a function rather than a bare process.exit(). First,
+ * process.exit() does not wait for stdout: on a pipe it is asynchronous, and
+ * anything past the 64 KB pipe buffer is dropped, so exiting straight after a
+ * write can truncate the output. Second, simply returning is not an option
+ * either — after `init`'s registration call undici keeps the pooled connection
+ * alive for about three seconds and that holds the event loop open, so a clean
+ * return leaves the command sitting there looking hung.
+ *
+ * Draining both streams and exiting from the callback is the only version that
+ * is both complete and prompt. `exitCode` is set as well, so the status is still
+ * right if the process happens to end on its own first.
+ */
+const exitAfterFlush = (code: number): void => {
+  process.exitCode = code;
+  let pending = 2;
+  const done = () => {
+    if (--pending === 0) process.exit(code);
+  };
+  process.stdout.write("", done);
+  process.stderr.write("", done);
+};
+
+/**
+ * A corrupt config is a reason to warn, never a reason to crash a host's startup.
+ *
+ * Warned at most once per process. The MCP server re-reads the config on every
+ * tool call, and one broken file should not put a line in the host's log for
+ * every confession an agent writes.
+ */
+let warnedAboutConfig = false;
 const readConfigQuietly = (): Config | null => {
   try {
     return readConfig();
   } catch (e) {
-    errOut(`peppyneuron: ${e instanceof Error ? e.message : String(e)}\n`);
+    if (!warnedAboutConfig) {
+      warnedAboutConfig = true;
+      errOut(`peppyneuron: ${e instanceof Error ? e.message : String(e)}\n`);
+    }
     return null;
   }
 };
@@ -76,8 +111,10 @@ const humanDuration = (ms: number): string => {
 // --- the MCP server ---------------------------------------------------------
 
 const runServer = async (): Promise<void> => {
-  const config = readConfigQuietly();
-  const built = buildServer({ config });
+  // Passed as the reader rather than as a value: the server re-reads it on every
+  // tool call so that ending dry-run by hand reaches a process a host started
+  // hours ago. See the `dryRun` comment in server.ts.
+  const built = buildServer({ config: readConfigQuietly });
 
   // stderr only. Hosts surface it in their logs, and a human debugging an
   // install should not have to guess which of these three states they are in.
@@ -101,7 +138,7 @@ const runServer = async (): Promise<void> => {
 
 // --- init -------------------------------------------------------------------
 
-const init = async (argv: string[]): Promise<never> => {
+const init = async (argv: string[]): Promise<void> => {
   const force = argv.includes("--force");
   const existing = readConfigQuietly();
 
@@ -124,7 +161,8 @@ const init = async (argv: string[]): Promise<never> => {
         "experiment is computed from.\n\n" +
         "If a second agent is genuinely what you want, re-run with --force.\n",
     );
-    process.exit(1);
+    exitAfterFlush(1);
+    return;
   }
 
   // THE BANNER COMES FIRST. Before the network call, not after it and not
@@ -142,7 +180,8 @@ const init = async (argv: string[]): Promise<never> => {
         res.kind === "network" ? networkMessage(res.detail) : agentMessage(res.error, res.hint)
       }\n`,
     );
-    process.exit(1);
+    exitAfterFlush(1);
+    return;
   }
 
   // The api_url is stored whenever it is not the built-in default, because a key
@@ -183,12 +222,12 @@ const init = async (argv: string[]): Promise<never> => {
         "host runs. Unset it to use the agent you just registered.\n",
     );
   }
-  process.exit(0);
+  exitAfterFlush(0);
 };
 
 // --- status -----------------------------------------------------------------
 
-const status = (): never => {
+const status = (): void => {
   const cfg = readConfigQuietly();
   const key = resolveApiKey(cfg);
 
@@ -199,7 +238,8 @@ const status = (): never => {
         "  tools    none — a keyless MCP server exposes zero tools\n\n" +
         "Run `npx peppyneuron-mcp init` to register an agent.\n",
     );
-    process.exit(1);
+    exitAfterFlush(1);
+    return;
   }
 
   const remaining = dryRunRemainingMs(cfg);
@@ -237,7 +277,7 @@ const status = (): never => {
         "changes what leaves your machine.\n",
     );
   }
-  process.exit(0);
+  exitAfterFlush(0);
 };
 
 // --- dispatch ---------------------------------------------------------------
@@ -266,11 +306,11 @@ const main = async (argv: string[]): Promise<void> => {
       return;
     default:
       errOut(`Unknown command: ${command}\n\n${USAGE}`);
-      process.exit(1);
+      exitAfterFlush(1);
   }
 };
 
 main(process.argv.slice(2)).catch((e: unknown) => {
   errOut(`peppyneuron: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}\n`);
-  process.exit(1);
+  exitAfterFlush(1);
 });
