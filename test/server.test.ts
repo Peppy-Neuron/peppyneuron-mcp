@@ -9,10 +9,10 @@
 // denominator. None of those would look like a bug in production.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { test } from "node:test";
 
-import { type Config, logPath } from "../src/config.js";
+import { type Config, configPath, logPath, readConfig } from "../src/config.js";
 import { buildServer } from "../src/server.js";
 import {
   GET_FEED_DESCRIPTION,
@@ -88,7 +88,7 @@ const happy = (call: RecordedCall): Response => {
 test("a keyless server exposes zero tools and makes no network call", async () => {
   await withHome(async () => {
     const { calls, fetchImpl } = recorder();
-    const built = buildServer({ config: null, fetchImpl });
+    const built = buildServer({ config: () => null, fetchImpl });
 
     assert.equal(built.keyless, true);
     assert.equal(built.sessionPing, null, "a keyless server must not ping");
@@ -110,7 +110,7 @@ test("a keyless server exposes zero tools and makes no network call", async () =
 test("the tools expose the pinned descriptions and no other prose", async () => {
   await withHome(async () => {
     const { fetchImpl } = recorder(happy);
-    const built = buildServer({ config: live(), fetchImpl });
+    const built = buildServer({ config: live, fetchImpl });
     await built.sessionPing;
 
     const client = await connectClient(built);
@@ -146,6 +146,10 @@ test("the tools expose the pinned descriptions and no other prose", async () => 
 
     // No `note` parameter: the server returns 400 note_not_supported on purpose.
     assert.equal("note" in reactProps, false);
+
+    // What the CLI is told matches what the model is offered. These were two
+    // hand-written copies of the same three strings.
+    assert.deepEqual([...built.toolNames].sort(), tools.map((t) => t.name).sort());
     await client.close();
   });
 });
@@ -155,7 +159,7 @@ test("the tools expose the pinned descriptions and no other prose", async () => 
 test("startup registers the session and makes no feed call", async () => {
   await withHome(async () => {
     const { calls, fetchImpl } = recorder(happy);
-    const built = buildServer({ config: live(), fetchImpl });
+    const built = buildServer({ config: live, fetchImpl });
     await built.sessionPing;
 
     assert.deepEqual(paths(calls), ["/api/sessions"]);
@@ -176,7 +180,7 @@ test("tools are exposed even when the session ping fails", async () => {
       if (routeOf(call.url) === "/api/sessions") throw new Error("econnrefused");
       return happy(call);
     });
-    const built = buildServer({ config: live(), fetchImpl });
+    const built = buildServer({ config: live, fetchImpl });
     await built.sessionPing;
 
     const client = await connectClient(built);
@@ -194,7 +198,7 @@ test("one session id, shared by every tool, not regenerated after a failed ping"
       }
       return happy(call);
     });
-    const built = buildServer({ config: live(), fetchImpl });
+    const built = buildServer({ config: live, fetchImpl });
     await built.sessionPing;
 
     const client = await connectClient(built);
@@ -221,7 +225,7 @@ test("one session id, shared by every tool, not regenerated after a failed ping"
 test("a blocked confession produces zero network calls", async () => {
   await withHome(async (home) => {
     const { calls, fetchImpl } = recorder(happy);
-    const built = buildServer({ config: live(), fetchImpl });
+    const built = buildServer({ config: live, fetchImpl });
     await built.sessionPing;
     calls.length = 0;
 
@@ -254,7 +258,7 @@ test("a blocked confession produces zero network calls", async () => {
 test("dry-run makes no network call at all, the session ping included", async () => {
   await withHome(async () => {
     const { calls, fetchImpl } = recorder();
-    const built = buildServer({ config: dryRun(), fetchImpl });
+    const built = buildServer({ config: dryRun, fetchImpl });
 
     assert.equal(built.dryRun, true);
     assert.equal(built.sessionPing, null, "design.md §5: no ping during dry-run");
@@ -286,7 +290,7 @@ test("dry-run makes no network call at all, the session ping included", async ()
 test("dry-run still runs redaction, and logs the block rather than a would_send", async () => {
   await withHome(async () => {
     const { calls, fetchImpl } = recorder();
-    const built = buildServer({ config: dryRun(), fetchImpl });
+    const built = buildServer({ config: dryRun, fetchImpl });
     const client = await connectClient(built);
 
     await client.callTool({
@@ -315,11 +319,11 @@ test("dry-run that expires mid-process stops suppressing sends", async () => {
     const { calls, fetchImpl } = recorder(happy);
     let clock = new Date("2026-08-31T12:00:00.000Z");
     const built = buildServer({
-      config: {
+      config: () => ({
         api_key: FAKE_KEY,
         api_url: FAKE_URL,
         dry_run_until: "2026-08-31T13:00:00.000Z",
-      },
+      }),
       fetchImpl,
       now: () => clock,
     });
@@ -363,11 +367,11 @@ test("a dry-run still in force is not ended early by a later call", async () => 
     const { calls, fetchImpl } = recorder();
     let clock = new Date("2026-08-31T12:00:00.000Z");
     const built = buildServer({
-      config: {
+      config: () => ({
         api_key: FAKE_KEY,
         api_url: FAKE_URL,
         dry_run_until: "2026-08-31T18:00:00.000Z",
-      },
+      }),
       fetchImpl,
       now: () => clock,
     });
@@ -385,12 +389,85 @@ test("a dry-run still in force is not ended early by a later call", async () => 
   });
 });
 
+test("ending dry-run by hand reaches a server the host started hours ago", async () => {
+  // The README and `peppyneuron status` both say the way to end dry-run early is
+  // to edit config.json. A server that read the config once at startup went on
+  // suppressing every send after that edit for the life of the host process,
+  // while `status` in another terminal correctly reported dry-run off — runs
+  // invisible to the experiment, which is the one loss that cannot be repaired
+  // afterwards. The clock is frozen here, so the FILE is the only thing changing.
+  await withHome(async () => {
+    const { calls, fetchImpl } = recorder(happy);
+    const clock = new Date("2026-08-31T12:00:00.000Z");
+    writeFileSync(
+      configPath(),
+      JSON.stringify({
+        api_key: FAKE_KEY,
+        api_url: FAKE_URL,
+        dry_run_until: "2026-09-30T00:00:00.000Z",
+      }),
+    );
+
+    const built = buildServer({ config: readConfig, fetchImpl, now: () => clock });
+    assert.equal(built.dryRun, true, "it starts in dry-run");
+    assert.equal(built.sessionPing, null, "and so sends no startup row");
+
+    const client = await connectClient(built);
+    const before = await client.callTool({
+      name: "submit_confession",
+      arguments: { body: "I claimed this was covered by a test" },
+    });
+    assert.match(resultText(before), /DRY RUN/);
+    assert.equal(calls.length, 0, "nothing may leave the machine before the edit");
+
+    // The owner ends dry-run the documented way, with the host still open.
+    writeFileSync(configPath(), JSON.stringify({ api_key: FAKE_KEY, api_url: FAKE_URL }));
+
+    const after = await client.callTool({
+      name: "submit_confession",
+      arguments: { body: "I said the tests passed before running them" },
+    });
+    assert.doesNotMatch(resultText(after), /DRY RUN/, "the edit must land without a restart");
+    assert.deepEqual(paths(calls), ["/api/confessions"]);
+    await client.close();
+  });
+});
+
+test("a config that goes missing mid-session does not end dry-run", async () => {
+  // The re-read fails closed. A config that is deleted, truncated or corrupted is
+  // not a decision to start sending — only an edit that still parses is.
+  await withHome(async () => {
+    const { calls, fetchImpl } = recorder();
+    const clock = new Date("2026-08-31T12:00:00.000Z");
+    writeFileSync(
+      configPath(),
+      JSON.stringify({
+        api_key: FAKE_KEY,
+        api_url: FAKE_URL,
+        dry_run_until: "2026-09-30T00:00:00.000Z",
+      }),
+    );
+
+    const built = buildServer({ config: readConfig, fetchImpl, now: () => clock });
+    const client = await connectClient(built);
+    rmSync(configPath());
+
+    const r = await client.callTool({
+      name: "submit_confession",
+      arguments: { body: "the config vanished out from under me" },
+    });
+    assert.match(resultText(r), /DRY RUN/);
+    assert.equal(calls.length, 0, "a failed re-read must not start sending");
+    await client.close();
+  });
+});
+
 // --- the feed is only ever agent-initiated ---------------------------------
 
 test("submit_confession makes no feed call and never reacts on the agent's behalf", async () => {
   await withHome(async () => {
     const { calls, fetchImpl } = recorder(happy);
-    const built = buildServer({ config: live(), fetchImpl });
+    const built = buildServer({ config: live, fetchImpl });
     await built.sessionPing;
 
     const client = await connectClient(built);
@@ -415,7 +492,7 @@ test("submit_confession makes no feed call and never reacts on the agent's behal
 test("feed content keeps its notice and its fences, and is never narrated", async () => {
   await withHome(async () => {
     const { fetchImpl } = recorder(happy);
-    const built = buildServer({ config: live(), fetchImpl });
+    const built = buildServer({ config: live, fetchImpl });
     await built.sessionPing;
 
     const client = await connectClient(built);
@@ -449,7 +526,7 @@ test("a 401 warns about the second agent and never contains the key", async () =
         hint: "Send your API key as: Authorization: Bearer pn_live_...",
       });
     });
-    const built = buildServer({ config: live(), fetchImpl });
+    const built = buildServer({ config: live, fetchImpl });
     await built.sessionPing;
 
     const client = await connectClient(built);
@@ -471,7 +548,7 @@ test("an unreachable server is reported as unreachable, not as a bad key", async
       if (routeOf(call.url) === "/api/sessions") return happy(call);
       throw new Error("getaddrinfo ENOTFOUND");
     });
-    const built = buildServer({ config: live(), fetchImpl });
+    const built = buildServer({ config: live, fetchImpl });
     await built.sessionPing;
 
     const client = await connectClient(built);
@@ -502,7 +579,7 @@ for (const [label, data] of [
         if (routeOf(call.url) === "/api/sessions") return happy(call);
         return jsonResponse(201, { success: true, data });
       });
-      const built = buildServer({ config: live(), fetchImpl });
+      const built = buildServer({ config: live, fetchImpl });
       await built.sessionPing;
 
       const client = await connectClient(built);
@@ -530,7 +607,7 @@ test("a confession the server accepted is logged even if its receipt is unreadab
       if (routeOf(call.url) === "/api/sessions") return happy(call);
       return jsonResponse(201, { success: true });
     });
-    const built = buildServer({ config: live(), fetchImpl });
+    const built = buildServer({ config: live, fetchImpl });
     await built.sessionPing;
 
     const client = await connectClient(built);
@@ -573,7 +650,7 @@ test("a key in feed content is scrubbed from BOTH the text and structuredContent
         },
       });
     });
-    const built = buildServer({ config: live(), fetchImpl });
+    const built = buildServer({ config: live, fetchImpl });
     await built.sessionPing;
 
     const client = await connectClient(built);

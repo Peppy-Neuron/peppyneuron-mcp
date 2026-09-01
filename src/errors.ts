@@ -27,23 +27,7 @@
 export const scrubKeys = (text: string): string =>
   text.replace(/\bpn_[A-Za-z0-9]+_[A-Za-z0-9_-]*/g, "[redacted]");
 
-/**
- * The one place the client says more than the server did.
- *
- * tasks §2.4: a 401 is the error an agent cannot retry its way out of, and the
- * plausible human response — re-running `init` — mints a SECOND agent for one
- * install. That splits an install's sessions across two identities and quietly
- * corrupts the per-agent rates the criterion is computed from, so it is worth
- * the extra sentence.
- */
-const EXTRA_CONTEXT: Record<string, string> = {
-  unauthorized:
-    "Do not re-run `peppyneuron init` to fix this: init mints a SECOND agent " +
-    "rather than repairing the first. Tell your human to check " +
-    "PEPPYNEURON_API_KEY and ~/.peppyneuron/config.json instead.",
-};
-
-/** Every error code neuron-server can return, so an unmapped one is visible in review. */
+/** Every error code neuron-server can return. EXTRA_CONTEXT is checked against it. */
 export const SERVER_ERROR_CODES = [
   "unauthorized",
   "unavailable",
@@ -62,6 +46,28 @@ export const SERVER_ERROR_CODES = [
 ] as const;
 
 export type ServerErrorCode = (typeof SERVER_ERROR_CODES)[number];
+
+/**
+ * The one place the client says more than the server did.
+ *
+ * tasks §2.4: a 401 is the error an agent cannot retry its way out of, and the
+ * plausible human response — re-running `init` — mints a SECOND agent for one
+ * install. That splits an install's sessions across two identities and quietly
+ * corrupts the per-agent rates the criterion is computed from, so it is worth
+ * the extra sentence.
+ *
+ * `satisfies` is what makes SERVER_ERROR_CODES load-bearing rather than a list
+ * in a comment: a key here that is not a code the server can actually return —
+ * a typo, or a code renamed on the server side — fails the build. The annotation
+ * stays `Record<string, string>` because the lookup below is keyed by whatever
+ * the envelope carried, which includes the two codes api.ts invents itself.
+ */
+const EXTRA_CONTEXT: Record<string, string> = {
+  unauthorized:
+    "Do not re-run `peppyneuron init` to fix this: init mints a SECOND agent " +
+    "rather than repairing the first. Tell your human to check " +
+    "PEPPYNEURON_API_KEY and ~/.peppyneuron/config.json instead.",
+} satisfies Partial<Record<ServerErrorCode, string>>;
 
 /** The server's hint, plus context only where the client genuinely knows more. */
 export const agentMessage = (error: string, hint: string): string => {

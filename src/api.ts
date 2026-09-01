@@ -169,12 +169,11 @@ const request = async <T>(opts: RequestOptions): Promise<ApiResult<T>> => {
   if (res.ok && env.success === true) {
     // Every route this client calls returns a JSON OBJECT as `data`. A success
     // envelope carrying null, a primitive, an array, or nothing at all is a
-    // server bug, and both ways it used to surface were worse than an error:
-    // submit_confession read `res.data.id` and threw a raw TypeError at the
-    // agent BEFORE writing its log line — a confession the server had already
-    // accepted, with no row in the owner's receipt — while react handed
-    // `structured()` a null that the MCP result schema rejects outright, failing
-    // the whole call as a protocol error rather than a tool error.
+    // server bug, and it has to be turned into an error HERE: unchecked, it
+    // reaches the tools as a raw TypeError thrown before the log line is
+    // written — a confession the server accepted, with no row in the owner's
+    // receipt — or as a null that the MCP result schema rejects outright,
+    // failing the whole call as a protocol error rather than a tool error.
     //
     // Caught here rather than at the three call sites for the same reason the
     // non-JSON case above is: "the server answered and we cannot use it" is one

@@ -25,24 +25,43 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 
-import { createApi, type FetchLike } from "./api.js";
+import { type ApiNetworkError, type ApiServerError, createApi, type FetchLike } from "./api.js";
 import { type Config, isDryRun, resolveApiKey, resolveApiUrl } from "./config.js";
 import { agentMessage, networkMessage, scrubKeys } from "./errors.js";
-import { appendLog, nowIso } from "./log.js";
+import { appendLog, type LogEntry, nowIso } from "./log.js";
 import { blockMessage, redact } from "./redact.js";
 import {
   GET_FEED_DESCRIPTION,
   REACT_DESCRIPTION,
   REACTION_KINDS,
+  type ReactionKind,
   SUBMIT_CONFESSION_DESCRIPTION,
 } from "./stimulus.js";
 import { passThrough } from "./untrusted.js";
 import { NAME, VERSION } from "./version.js";
 
-const REACTIONS = Object.keys(REACTION_KINDS) as [string, ...string[]];
+/**
+ * The three tools of DESIGN.md §7.1, named once.
+ *
+ * Every registration, every log line, and the list handed back to the CLI read
+ * from here, so a rename cannot leave one of them behind.
+ */
+const TOOL = {
+  confess: "submit_confession",
+  react: "react",
+  feed: "get_feed",
+} as const;
+
+/** The five keys as a union rather than as `string`, so a handler sees the enum. */
+const REACTIONS = Object.keys(REACTION_KINDS) as [ReactionKind, ...ReactionKind[]];
 
 export interface BuildOptions {
-  config: Config | null;
+  /**
+   * How to read this install's config: called once at startup for the identity,
+   * and again on every tool call for the dry-run deadline. See `dryRun` below —
+   * the key and the url are a startup decision and that deadline is not.
+   */
+  config: () => Config | null;
   fetchImpl?: FetchLike;
   /** Injectable only so a test can assert the id is reused; production always mints one. */
   sessionId?: string;
@@ -66,6 +85,9 @@ export interface BuiltServer {
 
 const text = (s: string) => ({ content: [{ type: "text" as const, text: scrubKeys(s) }] });
 const failure = (s: string) => ({ ...text(s), isError: true as const });
+
+/** exactOptionalPropertyTypes forbids `correlation_id: undefined`, hence the spread. */
+const correlation = (id: string | null) => (id ? { correlation_id: id } : {});
 
 /**
  * A tool result that carries the server's own structure.
@@ -134,7 +156,7 @@ const buildKeyless = (): BuiltServer => {
 };
 
 export const buildServer = (opts: BuildOptions): BuiltServer => {
-  const cfg = opts.config;
+  const cfg = opts.config();
   const apiKey = resolveApiKey(cfg);
 
   // Before anything else, and without touching the network.
@@ -143,16 +165,22 @@ export const buildServer = (opts: BuildOptions): BuiltServer => {
   const now = opts.now ?? (() => new Date());
   const apiUrl = resolveApiUrl(cfg);
 
-  // Re-checked on every call, never captured once at startup.
+  // Re-read on every call — the clock AND the file — never captured at startup.
   //
   // An MCP host keeps this process alive for a whole app session — days, for a
-  // desktop host left open — so a 24-hour dry-run routinely expires inside a
-  // running server. Reading it once meant that server went on suppressing every
-  // send for the rest of its life while `peppyneuron status` in another terminal
-  // correctly reported dry-run off. Those runs are invisible to the experiment
-  // and cannot be counted afterwards, which makes a stale `true` here a way to
-  // silently lose the primary measurement.
-  const dryRun = (): boolean => isDryRun(cfg, now());
+  // desktop host left open — so both of the ways dry-run ends arrive inside a
+  // running server. It expires on its own after 24 hours, and the documented way
+  // to end it early (the README, and `peppyneuron status`) is a hand edit to
+  // config.json. Capturing either the clock or the file once meant that server
+  // went on suppressing every send for the rest of its life while `peppyneuron
+  // status` in another terminal correctly reported dry-run off. Those runs are
+  // invisible to the experiment and cannot be counted afterwards, which makes a
+  // stale `true` here a way to silently lose the primary measurement.
+  //
+  // A re-read that comes back empty falls back to the config we started with, so
+  // a config deleted or corrupted mid-session cannot end dry-run by accident.
+  // Only an edit that still parses does.
+  const dryRun = (): boolean => isDryRun(opts.config() ?? cfg, now());
 
   // ONE uuid, generated once, used by all three tools for the whole process.
   // Never regenerated after a failure: the server back-fills a session row from
@@ -166,11 +194,44 @@ export const buildServer = (opts: BuildOptions): BuiltServer => {
     ...(opts.fetchImpl ? { fetchImpl: opts.fetchImpl } : {}),
   });
 
+  /** One line in the owner's receipt, with the fields every entry shares filled in. */
+  const log = (tool: string, entry: Omit<LogEntry, "at" | "session_id" | "tool">): void => {
+    appendLog({ at: nowIso(), session_id: sessionId, tool, ...entry });
+  };
+
+  /**
+   * The failure path all three tools share: one log line, one message back.
+   *
+   * Written once because the three handlers differed only in `extra`, and the
+   * parts that must not vary were exactly the parts being retyped. A correlation
+   * id missing from one of three near-identical log lines is invisible until
+   * someone goes looking for a 500 in the function logs and the row that would
+   * have pointed at it is the one that was written by hand.
+   */
+  const failedCall = (
+    tool: string,
+    res: ApiServerError | ApiNetworkError,
+    extra: Pick<LogEntry, "body" | "detail"> = {},
+  ) => {
+    if (res.kind === "network") {
+      log(tool, { outcome: "failed", error: res.detail, ...extra });
+      return failure(networkMessage(res.detail));
+    }
+    log(tool, {
+      outcome: "failed",
+      status: res.status,
+      error: res.error,
+      ...correlation(res.correlationId),
+      ...extra,
+    });
+    return failure(agentMessage(res.error, res.hint));
+  };
+
   const server = new McpServer({ name: NAME, version: VERSION });
 
   // --- submit_confession ---------------------------------------------------
   server.registerTool(
-    "submit_confession",
+    TOOL.confess,
     {
       description: SUBMIT_CONFESSION_DESCRIPTION,
       // No .max(500) and no .describe(). The cap is enforced in redact() so that
@@ -181,26 +242,13 @@ export const buildServer = (opts: BuildOptions): BuiltServer => {
     async ({ body }) => {
       const checked = redact(body);
       if (!checked.ok) {
-        appendLog({
-          at: nowIso(),
-          session_id: sessionId,
-          tool: "submit_confession",
-          outcome: "blocked",
-          reason: checked.reason,
-          label: checked.label,
-        });
+        log(TOOL.confess, { outcome: "blocked", reason: checked.reason, label: checked.label });
         return failure(blockMessage(checked));
       }
 
       // design.md §5: dry-run is fully local. No request, and nothing invented.
       if (dryRun()) {
-        appendLog({
-          at: nowIso(),
-          session_id: sessionId,
-          tool: "submit_confession",
-          outcome: "dry_run",
-          body: checked.text,
-        });
+        log(TOOL.confess, { outcome: "dry_run", body: checked.text });
         return text(
           "DRY RUN — nothing was sent, and no confession exists on the server.\n\n" +
             "This is what would have been sent:\n\n" +
@@ -212,40 +260,13 @@ export const buildServer = (opts: BuildOptions): BuiltServer => {
       }
 
       const res = await api.submitConfession(checked.text, sessionId);
+      if (!res.ok) return failedCall(TOOL.confess, res, { body: checked.text });
 
-      if (res.ok === false && res.kind === "network") {
-        appendLog({
-          at: nowIso(),
-          session_id: sessionId,
-          tool: "submit_confession",
-          outcome: "failed",
-          body: checked.text,
-          error: res.detail,
-        });
-        return failure(networkMessage(res.detail));
-      }
-      if (res.ok === false) {
-        appendLog({
-          at: nowIso(),
-          session_id: sessionId,
-          tool: "submit_confession",
-          outcome: "failed",
-          body: checked.text,
-          status: res.status,
-          error: res.error,
-          ...(res.correlationId ? { correlation_id: res.correlationId } : {}),
-        });
-        return failure(agentMessage(res.error, res.hint));
-      }
-
-      appendLog({
-        at: nowIso(),
-        session_id: sessionId,
-        tool: "submit_confession",
+      log(TOOL.confess, {
         outcome: "sent",
         body: checked.text,
         status: res.status,
-        ...(res.correlationId ? { correlation_id: res.correlationId } : {}),
+        ...correlation(res.correlationId),
         detail: { id: res.data.id, status: res.data.status, url: res.data.url },
       });
 
@@ -255,21 +276,20 @@ export const buildServer = (opts: BuildOptions): BuiltServer => {
       // The client does NOT react on the agent's behalf. §5.3's instruction is
       // addressed to the agent; a client that acted on it would manufacture the
       // reaction rate the experiment is trying to measure.
-      const payload = {
+      return structured({
         id: res.data.id,
         agent: res.data.agent,
         status: res.data.status,
         url: res.data.url,
         react_to: passThrough(res.data.react_to),
         ...(res.data.instruction === undefined ? {} : { instruction: res.data.instruction }),
-      };
-      return structured(payload);
+      });
     },
   );
 
   // --- react ---------------------------------------------------------------
   server.registerTool(
-    "react",
+    TOOL.react,
     {
       description: REACT_DESCRIPTION,
       // The enum is validated here as well as in the database, so an agent that
@@ -279,14 +299,10 @@ export const buildServer = (opts: BuildOptions): BuiltServer => {
       inputSchema: { confession_id: z.string(), reaction: z.enum(REACTIONS) },
     },
     async ({ confession_id, reaction }) => {
+      const detail = { confession_id, reaction };
+
       if (dryRun()) {
-        appendLog({
-          at: nowIso(),
-          session_id: sessionId,
-          tool: "react",
-          outcome: "dry_run",
-          detail: { confession_id, reaction },
-        });
+        log(TOOL.react, { outcome: "dry_run", detail });
         return text(
           `DRY RUN — nothing was sent. A "${reaction}" reaction to ${confession_id} ` +
             "would have been submitted. No reaction exists on the server.",
@@ -294,40 +310,13 @@ export const buildServer = (opts: BuildOptions): BuiltServer => {
       }
 
       const res = await api.react(confession_id, reaction, sessionId);
+      if (!res.ok) return failedCall(TOOL.react, res, { detail });
 
-      if (res.ok === false && res.kind === "network") {
-        appendLog({
-          at: nowIso(),
-          session_id: sessionId,
-          tool: "react",
-          outcome: "failed",
-          error: res.detail,
-          detail: { confession_id, reaction },
-        });
-        return failure(networkMessage(res.detail));
-      }
-      if (res.ok === false) {
-        appendLog({
-          at: nowIso(),
-          session_id: sessionId,
-          tool: "react",
-          outcome: "failed",
-          status: res.status,
-          error: res.error,
-          ...(res.correlationId ? { correlation_id: res.correlationId } : {}),
-          detail: { confession_id, reaction },
-        });
-        return failure(agentMessage(res.error, res.hint));
-      }
-
-      appendLog({
-        at: nowIso(),
-        session_id: sessionId,
-        tool: "react",
+      log(TOOL.react, {
         outcome: "sent",
         status: res.status,
-        ...(res.correlationId ? { correlation_id: res.correlationId } : {}),
-        detail: { confession_id, reaction },
+        ...correlation(res.correlationId),
+        detail,
       });
       return structured(res.data);
     },
@@ -340,7 +329,7 @@ export const buildServer = (opts: BuildOptions): BuiltServer => {
   // false, so a client that touched the feed for its own reasons would set that
   // flag on every session and destroy the primary result.
   server.registerTool(
-    "get_feed",
+    TOOL.feed,
     {
       description: GET_FEED_DESCRIPTION,
       // Bounded to the range rpc.feed already clamps to
@@ -353,10 +342,7 @@ export const buildServer = (opts: BuildOptions): BuiltServer => {
     },
     async ({ limit }) => {
       if (dryRun()) {
-        appendLog({
-          at: nowIso(),
-          session_id: sessionId,
-          tool: "get_feed",
+        log(TOOL.feed, {
           outcome: "dry_run",
           ...(limit === undefined ? {} : { detail: { limit } }),
         });
@@ -369,39 +355,14 @@ export const buildServer = (opts: BuildOptions): BuiltServer => {
       }
 
       const res = await api.getFeed(sessionId, limit);
-
-      if (res.ok === false && res.kind === "network") {
-        appendLog({
-          at: nowIso(),
-          session_id: sessionId,
-          tool: "get_feed",
-          outcome: "failed",
-          error: res.detail,
-        });
-        return failure(networkMessage(res.detail));
-      }
-      if (res.ok === false) {
-        appendLog({
-          at: nowIso(),
-          session_id: sessionId,
-          tool: "get_feed",
-          outcome: "failed",
-          status: res.status,
-          error: res.error,
-          ...(res.correlationId ? { correlation_id: res.correlationId } : {}),
-        });
-        return failure(agentMessage(res.error, res.hint));
-      }
+      if (!res.ok) return failedCall(TOOL.feed, res);
 
       // Structure in, structure out. Never `agent + ": " + body`.
       const payload = passThrough(res.data);
-      appendLog({
-        at: nowIso(),
-        session_id: sessionId,
-        tool: "get_feed",
+      log(TOOL.feed, {
         outcome: "sent",
         status: res.status,
-        ...(res.correlationId ? { correlation_id: res.correlationId } : {}),
+        ...correlation(res.correlationId),
         detail: { items: payload.items.length },
       });
       return structured(payload);
@@ -417,15 +378,15 @@ export const buildServer = (opts: BuildOptions): BuiltServer => {
   // it runs, no ping is dispatched late. That costs nothing — the server
   // back-fills a session row from the first confession (see the sessionId
   // comment above), so the denominator survives the gap.
+  //
+  // It does not go through failedCall: that reports to the agent, and a ping the
+  // agent never asked for must never turn into a message it has to read.
   let sessionPing: Promise<unknown> | null = null;
   if (!dryRun()) {
     sessionPing = api
       .registerSession(sessionId)
       .then((res) => {
-        appendLog({
-          at: nowIso(),
-          session_id: sessionId,
-          tool: "session",
+        log("session", {
           outcome: res.ok ? "sent" : "failed",
           ...(res.ok
             ? { status: res.status }
@@ -437,10 +398,7 @@ export const buildServer = (opts: BuildOptions): BuiltServer => {
       })
       // Swallowed on purpose, and never surfaced to the agent.
       .catch((e: unknown) => {
-        appendLog({
-          at: nowIso(),
-          session_id: sessionId,
-          tool: "session",
+        log("session", {
           outcome: "failed",
           error: e instanceof Error ? e.message : String(e),
         });
@@ -451,7 +409,7 @@ export const buildServer = (opts: BuildOptions): BuiltServer => {
   return {
     connect: (t) => server.connect(t),
     sessionId,
-    toolNames: ["submit_confession", "react", "get_feed"],
+    toolNames: Object.values(TOOL),
     dryRun: dryRun(),
     keyless: false,
     sessionPing,
