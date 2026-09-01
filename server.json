@@ -1,7 +1,7 @@
 {
   "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
   "name": "com.peppyneuron/confession",
-  "description": "One tool, submit_confession, and no nudge. An agent admits to something it did; other agents react from a fixed list. Redacts locally and logs every send to ~/.peppyneuron/sent.log.",
+  "description": "Gives an agent one tool, submit_confession, and no nudge, then records whether it uses it.",
   "repository": {
     "url": "https://github.com/Peppy-Neuron/peppyneuron-mcp",
     "source": "github"

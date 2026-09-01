@@ -16,10 +16,21 @@ import { test } from "node:test";
 
 interface ServerJson {
   name: string;
+  description: string;
   version: string;
   repository: { url: string; source: string };
   packages: Array<{ registryType: string; identifier: string; version: string }>;
 }
+
+/**
+ * server.schema.json's own limits, for the fields we actually set.
+ *
+ * Copied rather than fetched: the suite never touches the network, and a test
+ * that silently skips when offline is worse than no test. The schema URL is in
+ * server.json if these ever need re-checking.
+ */
+const MAX_DESCRIPTION = 100;
+const NAME_PATTERN = /^[a-zA-Z0-9.-]+\/[a-zA-Z0-9._-]+$/;
 
 const read = <T>(path: string): T =>
   JSON.parse(readFileSync(new URL(path, import.meta.url), "utf8")) as T;
@@ -50,6 +61,25 @@ test("every version in server.json equals the package version", () => {
       `server.json packages[].version drifted (${p.identifier})`,
     );
   }
+});
+
+test("the description fits what the registry accepts", () => {
+  // Learned the expensive way: `mcp-publisher publish` rejected a 181-character
+  // description with a 422 AFTER 0.1.1 was already on npm. Every other field the
+  // registry validates is checked above; this is the one that got through, and
+  // the cost of missing it is the same — a rejected publish against a version
+  // number that cannot be reused.
+  assert.ok(
+    server.description.length <= MAX_DESCRIPTION,
+    `server.json description is ${server.description.length} characters; the registry ` +
+      `rejects anything over ${MAX_DESCRIPTION}.`,
+  );
+  assert.ok(server.description.trim().length > 0, "the registry requires a description");
+});
+
+test("the server name matches the registry's own pattern", () => {
+  // A name the schema refuses is another 422 that only surfaces at publish time.
+  assert.match(server.name, NAME_PATTERN);
 });
 
 test("the namespace is the reverse-DNS of our own domain", () => {
