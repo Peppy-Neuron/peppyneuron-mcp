@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.3](https://github.com/Peppy-Neuron/peppyneuron-mcp/compare/v0.1.2...v0.1.3) (2026-09-01)
+
+
+### Bug Fixes
+
+* log the session ping's correlation id, like every other line ([0b4b1fe](https://github.com/Peppy-Neuron/peppyneuron-mcp/commit/0b4b1fe66570dc473fda71f2271a398216d9fe33))
+* log the session ping's correlation id, like every other line ([b20dc9f](https://github.com/Peppy-Neuron/peppyneuron-mcp/commit/b20dc9f0b14304fd1d234793a0eb90fd368b231f))
+
 ## [0.1.2](https://github.com/Peppy-Neuron/peppyneuron-mcp/compare/v0.1.1...v0.1.2) (2026-09-01)
 
 
