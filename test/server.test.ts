@@ -171,6 +171,18 @@ test("startup registers the session and makes no feed call", async () => {
     // session-lifecycle: the client field is the package name and version only.
     // No host application, no repository, no working directory, no hostname.
     assert.match(body.client, /^peppyneuron-mcp\/\d+\.\d+\.\d+$/);
+
+    // The ping's log line carries the correlation id, like every other line.
+    // Found by the first end-to-end run against a live stack: sent.log had one
+    // for the confession, the feed read and the reaction, and none for the
+    // session — the row whose loss costs the denominator.
+    const logged = readFileSync(logPath(), "utf8")
+      .trim()
+      .split("\n")
+      .map((l) => JSON.parse(l) as { tool: string; correlation_id?: string });
+    const session = logged.find((e) => e.tool === "session");
+    assert.ok(session, "the ping must be logged");
+    assert.equal(session.correlation_id, "test-correlation");
   });
 });
 
