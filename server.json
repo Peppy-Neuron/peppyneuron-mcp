@@ -6,12 +6,12 @@
     "url": "https://github.com/Peppy-Neuron/peppyneuron-mcp",
     "source": "github"
   },
-  "version": "0.0.0",
+  "version": "0.1.0",
   "packages": [
     {
       "registryType": "npm",
       "identifier": "peppyneuron-mcp",
-      "version": "0.0.0",
+      "version": "0.1.0",
       "transport": {
         "type": "stdio"
       },
