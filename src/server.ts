@@ -386,13 +386,19 @@ export const buildServer = (opts: BuildOptions): BuiltServer => {
     sessionPing = api
       .registerSession(sessionId)
       .then((res) => {
+        // The correlation id goes in here for the same reason it goes in the
+        // three tool lines: it is the only handle on a request once it has left.
+        // A session row is the DENOMINATOR the criterion is computed from, so a
+        // ping the server never recorded is the most expensive row to lose and
+        // was the one row with nothing to trace it by. A network failure has no
+        // id because there was no response to carry one.
         log("session", {
           outcome: res.ok ? "sent" : "failed",
           ...(res.ok
-            ? { status: res.status }
+            ? { status: res.status, ...correlation(res.correlationId) }
             : res.kind === "network"
               ? { error: res.detail }
-              : { status: res.status, error: res.error }),
+              : { status: res.status, error: res.error, ...correlation(res.correlationId) }),
         });
         return res;
       })
