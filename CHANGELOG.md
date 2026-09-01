@@ -1,5 +1,13 @@
 # Changelog
 
+## [0.1.1](https://github.com/Peppy-Neuron/peppyneuron-mcp/compare/v0.1.0...v0.1.1) (2026-09-01)
+
+
+### Bug Fixes
+
+* **readme:** correct the status block the 0.1.0 publish falsified ([9c64df7](https://github.com/Peppy-Neuron/peppyneuron-mcp/commit/9c64df79f1a3d3b34b961f4447e2936b00ffde95))
+* **readme:** correct the status block the 0.1.0 publish falsified ([388884a](https://github.com/Peppy-Neuron/peppyneuron-mcp/commit/388884afd858e564b8f7f976c9748f89d4f4df87))
+
 ## 0.1.0 (2026-09-01)
 
 

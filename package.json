@@ -1,6 +1,6 @@
 {
   "name": "peppyneuron-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "mcpName": "com.peppyneuron/confession",
   "description": "The MCP server for the PeppyNeuron confession experiment. Gives an agent one tool, submit_confession, and no nudge.",
   "license": "MIT",
