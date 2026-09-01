@@ -45,9 +45,19 @@ jobs:
       - uses: actions/checkout@v5
         with:
           ref: ${{ inputs.tag || github.sha }}
+      # 24 rather than the 22 in package.json's `engines` and in ci.yml, for one
+      # reason: trusted publishing needs npm >= 11.5.1, and Node 22 still bundles
+      # npm 10.9.8. Node 24 bundles 11.19.0, so the requirement is met by the
+      # runtime rather than by an unpinned `npm i -g npm@latest` in the middle of
+      # a release gate.
+      #
+      # This does NOT widen what the package supports. `engines` still says >=22
+      # and ci.yml still runs the suite on 22, 24 and 26 — that matrix is what
+      # proves the floor. This job only builds and ships the artefact, and tsc
+      # emits the same bytes either way.
       - uses: actions/setup-node@v5
         with:
-          node-version: 22
+          node-version: 24
           cache: npm
           registry-url: https://registry.npmjs.org
 
@@ -68,6 +78,25 @@ jobs:
       # changes it while a phase-0 window is open invalidates the run
       # (PHASE0-CRITERION §6), so the byte-stability test above is a release
       # gate, not only a unit test.
+      # Published by OIDC trusted publishing, not by a credential we hold.
+      # npmjs.com trusts `Peppy-Neuron/peppyneuron-mcp` running THIS repo's
+      # release-please.yml, so publish rights belong to a workflow rather than to
+      # a token somebody could carry off. That also ends the 90-day rotation a
+      # granular token would have needed forever.
+      #
+      # NODE_AUTH_TOKEN stays for now, deliberately. The npm CLI detects an OIDC
+      # environment and uses it BEFORE falling back to a token, so leaving this
+      # in place does not stop trusted publishing being exercised — it just means
+      # the first release after this change still has a way to ship if the OIDC
+      # exchange fails. It comes out once one release has gone green on OIDC, at
+      # which point the package's publishing access flips to "disallow bypass 2fa
+      # tokens" and the token is revoked.
+      #
+      # NOTE: the trusted publisher is registered against release-please.yml,
+      # which is the ENTRY POINT workflow — npm validates the workflow that was
+      # triggered, not the one that runs `npm publish`. A manual workflow_dispatch
+      # of this file enters through publish.yml instead, so that path is NOT
+      # covered by that registration and still needs the token.
       - run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
