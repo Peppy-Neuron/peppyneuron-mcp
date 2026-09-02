@@ -161,17 +161,32 @@
       this repo's `test/redact.test.ts`. Task 7.1 assumed a shared corpus; the
       server's suite actually has two ad-hoc fixtures, so drift is currently
       caught on the client side only
-- [ ] 10.7 `NeuronSite`: host the MCP Registry proof at
+- [x] 10.7 `NeuronSite`: host the MCP Registry proof at
       `/.well-known/mcp-registry-auth` so `com.peppyneuron/*` can be published.
-      TWO changes, and the second is the one that bites: add
-      `public/.well-known/mcp-registry-auth`, AND remove `**/.*` from
-      `firebase.json`'s `ignore` list — it excludes every dotfile, so the
-      directory would build into `out/` and then be dropped silently at deploy
-      with no error. Verified `out/` holds no other dotfiles, so narrowing the
-      rule to `**/.DS_Store` drops nothing else. The public key comes from
-      `scripts/registry-key.mjs new` in this repo; the private key never enters
-      a repository. Registry publishing happens only AFTER npm publish — the
-      registry stores metadata and verifies `mcpName` from the published tarball
+      Done 2026-09-01; `com.peppyneuron/confession` is listed and active. What
+      it actually took, since three of these were not in the original note:
+      - `public/.well-known/mcp-registry-auth`, holding the one `v=MCPv1;
+        k=ed25519; p=<key>` line. The public key comes from
+        `scripts/registry-key.mjs new` in this repo; the private key never
+        enters a repository
+      - `firebase.json`: `**/.*` excluded every dotfile, so the directory built
+        into `out/` and would have been dropped silently at deploy with no
+        error. Narrowed to `**/.DS_Store` — and `**/.env*` added back
+        deliberately, because the blanket rule that used to cover it is gone
+      - `scripts/check-discoverability.sh`: compares the *served bytes* against
+        the repo copy, not just the status code. A 200 serving a stale key is
+        indistinguishable from a 404 to the registry, and only a byte
+        comparison catches it
+      - Cloudflare, which is where this nearly died. The zone was blocking 11 AI
+        crawler user-agents and serving a managed `robots.txt` over ours. The
+        registry fetches the proof with a plain Go client and no browser
+        fingerprint, so a WAF rule can fail domain verification while `curl`
+        shows the file perfectly. Measured after the fix: `Go-http-client`,
+        empty UA and `curl` all get 200 on that path. If `mcp-publisher login
+        http` ever reports the domain unverified while `curl` shows the key,
+        suspect the WAF before the key
+      Order is load-bearing: npm publish first, then the registry, which stores
+      metadata only and verifies `mcpName` from the published tarball
 - [ ] 10.6 `neuron-server`: there is no route that reports whether an agent is
       claimed, so `peppyneuron status` cannot answer "claimed or not" and says so
       rather than guessing. A `GET /api/agents/me` returning display number,
