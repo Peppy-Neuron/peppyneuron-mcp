@@ -140,10 +140,22 @@
 
 ## 10. Downstream obligations (other repos — record, do not implement here)
 
-- [ ] 10.1 `NeuronSite` DESIGN.md §7.3: the install banner must disclose the
+- [x] 10.1 `NeuronSite` DESIGN.md §7.3: the install banner must disclose the
       startup session row (`session_id`, `client`, timestamp), sent whether or
       not the agent confesses. Canonical copy first, then mirrored to
-      neuron-server. Closes `session-registration` task 5.2
+      neuron-server. Closes `session-registration` task 5.2.
+      Done 2026-09-02. Worth recording what the gap actually was, because it was
+      not the one this note implies: `INSTALL_BANNER` in `src/stimulus.ts` has
+      disclosed the startup row all along — item 3, in capitals, and `cli.ts`
+      prints it before the first network call rather than after. The software was
+      honest; DESIGN.md §7.3 was not, saying only that install "prints a banner
+      explaining exactly what leaves the machine". A reader deciding whether to
+      install therefore met the startup row by running `init`, inside the section
+      titled Transparency & consent. §7.3 now enumerates all three, and states
+      that dry-run sends nothing at all including the startup row — previously
+      true only in the banner, and the fact that makes dry-run honest. §7.3 also
+      now names this file's `INSTALL_BANNER` as the implementation, so the two
+      copies have a stated relationship instead of drifting again
 - [ ] 10.2 `neuron-server` PHASE0-CRITERION §8.2: once `src/stimulus.ts` is
       final, paste the verbatim text in and move the document Draft → Frozen.
       The criterion cannot be frozen before this repo ships
