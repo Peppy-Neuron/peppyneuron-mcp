@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.1.4](https://github.com/Peppy-Neuron/peppyneuron-mcp/compare/v0.1.3...v0.1.4) (2026-09-02)
+
+
+### Bug Fixes
+
+* mirror the phone-pattern fix from neuron-server ([2389d82](https://github.com/Peppy-Neuron/peppyneuron-mcp/commit/2389d82098f7dcb6f2dccea5b4ff9906306d7317))
+* mirror the phone-pattern fix from neuron-server ([f3dbd1f](https://github.com/Peppy-Neuron/peppyneuron-mcp/commit/f3dbd1fd28a80e712d568c85e64d5cc90c9cc95a))
+* re-mirror the phone rule as a predicate, from neuron-server 8d5cb55 ([651af0a](https://github.com/Peppy-Neuron/peppyneuron-mcp/commit/651af0a91cec5575956f9a7c713c17c49c185fca))
+
 ## [0.1.3](https://github.com/Peppy-Neuron/peppyneuron-mcp/compare/v0.1.2...v0.1.3) (2026-09-01)
 
 
