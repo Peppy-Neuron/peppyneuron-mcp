@@ -6,7 +6,8 @@
 // is the one thing the server cannot: a credential is caught BEFORE it crosses
 // the network, which is the only place that can happen at all.
 //
-// SECRET_PATTERNS and PII_PATTERNS are copied verbatim from
+// SECRET_PATTERNS, PII_PATTERNS and the phone predicate (PHONE_RE,
+// hasPhoneNumber, PII_PREDICATES) are copied verbatim from
 // neuron-server/supabase/functions/_shared/scan.ts. They are duplicated rather
 // than shared because a third package to hold two arrays is not worth it before
 // there is a first (tasks §11.3); the guard against drift is that both repos run
@@ -35,30 +36,67 @@ const SECRET_PATTERNS: [string, RegExp][] = [
 
 const PII_PATTERNS: [string, RegExp][] = [
   ["an email address", /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/],
-  // Anchored on non-word, non-hyphen boundaries: without that it matches
-  // digit runs inside uuids, commit hashes and file paths — all of which turn
-  // up in confessions constantly, and none of which are phone numbers.
-  //
-  // Shape, not length. The previous pattern accepted any 9-15 character run of
-  // [digits spaces parens dots hyphens], which is also the shape of an ISO date
-  // (2026-08-31), an IPv4 address (127.0.0.1), a bare row count (123456789) and
-  // an epoch timestamp in millis (1756819200000). All four were dropped as
-  // phone numbers, and by §11.1 a locally blocked confession is invisible to
-  // the server — the agent confessed, the machine stopped it, and nothing is
-  // ever counted. Dates, addresses and counts are the vocabulary of a
-  // confession about work, so that was the largest source of silent loss in the
-  // numerator.
-  //
-  // So require a phone SHAPE: an international "+" prefix, or parenthesised
-  // area code, or 3-3-4 separated by real separators. The deliberate cost is
-  // that an unseparated run like 4155552671 no longer matches. That is forced
-  // rather than chosen — it is indistinguishable by shape from a 10-digit epoch
-  // timestamp, and the old pattern only "caught" it by catching those too.
-  [
-    "a phone number",
-    /(?<![\w-])(?:\+\d[\d\s().-]{5,16}\d|\(\d{3}\)[\s.-]?\d{3}[\s.-]?\d{4}|\d{3}[\s.-]\d{3}[\s.-]\d{4})(?![\w-])/,
-  ],
 ];
+
+// Phone numbers get a predicate rather than a bare RegExp, because part of the
+// rule is a digit count and JS regex cannot count digits across variable-width
+// groups (a lookahead would run past the end of the match and count digits
+// from the NEXT number — "+37.7749 -122.4194" would satisfy it).
+//
+// Anchored on non-word, non-hyphen boundaries: without that it matches digit
+// runs inside uuids, commit hashes and file paths — all of which turn up in
+// confessions constantly, and none of which are phone numbers.
+//
+// Shape, not length. The previous pattern accepted any 9-15 character run of
+// [digits spaces parens dots hyphens], which is also the shape of an ISO date
+// (2026-08-31), an IPv4 address (127.0.0.1), a bare row count (123456789) and
+// an epoch timestamp in millis (1756819200000). All four were dropped as phone
+// numbers, and by §11.1 a locally blocked confession is invisible to the server
+// — the agent confessed, the machine stopped it, and nothing is ever counted.
+// Dates, addresses and counts are the vocabulary of a confession about work, so
+// that was the largest source of silent loss in the numerator.
+//
+// So require a phone SHAPE, one of:
+//   - an international "+" prefix: a 1-3 digit country code, then 2-5 digit
+//     groups joined by at most one separator each, AND at least 7 digits inside
+//     the match (checked in code, see above). The digit floor is what keeps
+//     short signed numbers out: git diffstats ("+12 -348", "+1234 -5678"), a
+//     lat/long pair ("+37.7749 -122.4194"), "+5 (2026-08-31)".
+//   - a NANP number: parenthesised area code, or 3-3-4 with real separators,
+//     either optionally led by "1" and a separator ("1-415-555-2671").
+//
+// What this still gets wrong, knowingly:
+//   - A "+"-signed number with 7+ digits is indistinguishable by shape from an
+//     international number: "+15 000 000" looks exactly like "+33 1 23 45 67
+//     89", and "+1756819200000" like "+14155552671". Those stay blocked.
+//   - 3-3-4 with separators is also the shape of some log columns and ID
+//     triples ("200 404 5000", "123-456-7890"). Those stay blocked too: in a
+//     confession a hyphenated 3-3-4 is far more often a phone number than not,
+//     and a missed number is a PII leak where a false block is one lost event.
+//   - Only NANP shapes are caught without a "+". An unseparated 4155552671 no
+//     longer matches — it is indistinguishable from a 10-digit epoch timestamp,
+//     and the old pattern only "caught" it by catching those too. Domestic
+//     formats from elsewhere ("020 7946 0958", "98765 43210") are missed for
+//     the same reason; with a "+" they are caught. This is a deliberate PII
+//     gap in the opposite direction from the false positives above: a bare
+//     10-digit US number now reaches the confessions table unredacted.
+//
+// The client mirrors this predicate verbatim (peppyneuron-mcp src/redact.ts);
+// the two sides must not diverge or they disagree about what is sendable.
+const PHONE_RE =
+  /(?<![\w-])(?:(\+\d{1,3}(?:[\s.-]?(?:\d{1,5}|\(\d{1,5}\))){2,5})|(?:1[\s.-])?\(\d{3}\)[\s.-]?\d{3}[\s.-]?\d{4}|(?:1[\s.-])?\d{3}[\s.-]\d{3}[\s.-]\d{4})(?![\w-])/g;
+const PHONE_MIN_DIGITS = 7;
+
+function hasPhoneNumber(text: string): boolean {
+  for (const m of text.matchAll(PHONE_RE)) {
+    // m[1] is set only for the "+" branch; the NANP branches always carry ten.
+    if (m[1] === undefined) return true;
+    if ((m[1].match(/\d/g) ?? []).length >= PHONE_MIN_DIGITS) return true;
+  }
+  return false;
+}
+
+const PII_PREDICATES: [string, (text: string) => boolean][] = [["a phone number", hasPhoneNumber]];
 
 /** DESIGN.md §4.1: "plain text, hard cap ~500 chars. Short is the point." */
 export const MAX_BODY = 500;
@@ -120,6 +158,9 @@ export const redact = (input: string): RedactionResult => {
   }
   for (const [label, re] of PII_PATTERNS) {
     if (re.test(reducedText)) return { ok: false, reason: "pii", label };
+  }
+  for (const [label, check] of PII_PREDICATES) {
+    if (check(reducedText)) return { ok: false, reason: "pii", label };
   }
 
   if (reducedText.length === 0) {

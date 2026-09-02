@@ -165,6 +165,42 @@ test("the other shapes the old pattern ate are sendable too", () => {
     assert.equal(r.ok, true, `wrongly blocked: ${JSON.stringify(r)}`);
   }
 });
+
+test("the phone digit floor counts digits inside the match only", () => {
+  // A lookahead-based floor ran past the end of the match and borrowed digits
+  // from the next number, so a lat/long pair was blocked as a phone number.
+  // Diffstats are here for the same reason: a "+" followed by digits is exactly
+  // the start of the international shape, and only the digit floor keeps them
+  // out.
+  for (const body of [
+    "the office is at +37.7749 -122.4194 and I sent the client elsewhere",
+    "I said the diff was +12 -348 lines without reading it",
+    "+1234 -5678",
+    "+1 2 3 4 5 6 7",
+    "+5 (2026-08-31)",
+  ]) {
+    const r = redact(body);
+    assert.equal(r.ok, true, `wrongly blocked: ${JSON.stringify(r)}`);
+  }
+});
+
+test("known collisions stay blocked", () => {
+  // A "+"-signed number with 7+ digits has exactly the shape of an
+  // international phone number, and 3-3-4 with separators is also the shape of
+  // some log columns. Documented costs in redact.ts, not bugs: if one of these
+  // starts passing, the phone check has been weakened, not improved.
+  for (const body of [
+    "the counter jumped +15 000 000",
+    "I told them to try 1-415-555-2671 and it was my own number",
+    "the run logged 200 404 5000",
+    "task 123-456-7890",
+  ]) {
+    const r = redact(body);
+    assert.equal(r.ok, false, `no longer blocked: ${body}`);
+    if (!r.ok) assert.equal(r.label, "a phone number");
+  }
+});
+
 // --- path reduction (tasks §3.2) -------------------------------------------
 
 test("absolute paths are reduced to their basename", () => {

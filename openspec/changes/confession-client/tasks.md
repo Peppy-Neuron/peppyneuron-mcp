@@ -178,7 +178,11 @@
       deliberate cost is that an unseparated `4155552671` no longer matches; that
       is forced, not chosen, because it is indistinguishable by shape from a
       10-digit epoch timestamp and the old pattern only caught it by catching
-      those too
+      those too. Note the direction: that is a PII gap, accepted, and it holds
+      on both sides because the server misses the same shape. Review of the
+      server PR then found the digit floor was a lookahead that counted digits
+      from the NEXT number, so the phone rule became a predicate (regex for the
+      shape, digit count on the match); mirrored here as such
 - [ ] 10.5 `neuron-server` `tests/api.test.ts`: adopt the redaction corpus from
       this repo's `test/redact.test.ts`. Task 7.1 assumed a shared corpus; the
       server's suite actually has two ad-hoc fixtures, so drift is currently
