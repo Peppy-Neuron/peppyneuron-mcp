@@ -133,24 +133,38 @@ for (const body of CLEAN) {
   });
 }
 
-test("KNOWN FALSE POSITIVE: an ISO date reads as a phone number", () => {
-  // Inherited verbatim from neuron-server's scan.ts, so it is NOT fixed here.
-  // Diverging would defeat the point of copying the patterns: the two repos
-  // would disagree about what is sendable, and the server would accept bodies
-  // this client silently dropped.
+test("FIXED: an ISO date no longer reads as a phone number", () => {
+  // Was a pinned known-issue test asserting the opposite. neuron-server's
+  // scan.ts now matches a phone SHAPE rather than any 9-15 character digit run,
+  // and this file mirrors that pattern verbatim.
   //
-  // It matters more than it looks. Dates are ordinary in confessions about work,
-  // and tasks §11.1 records that a locally blocked confession is invisible to
-  // the server — so every one of these costs the numerator a real behavioural
-  // event that nothing will ever count.
-  //
-  // The fix belongs in neuron-server's scan.ts first, then mirrors here. When it
-  // lands, this test flips to asserting the date passes.
+  // Kept rather than deleted because the failure it guards is silent: redaction
+  // drops the whole confession, and tasks §11.1 records that a locally blocked
+  // confession never reaches the server, so a regression here would cost the
+  // phase-0 numerator real behavioural events with nothing anywhere reporting
+  // the gap.
   const r = redact("I claimed the tests passed on 2026-08-31 without running them");
+  assert.equal(r.ok, true, `wrongly blocked: ${JSON.stringify(r)}`);
+});
+
+test("the same relaxation does not let a real phone number through", () => {
+  const r = redact("I told the customer to call +1 415 555 2671 and never logged it");
   assert.equal(r.ok, false);
   if (!r.ok) assert.equal(r.label, "a phone number");
 });
 
+test("the other shapes the old pattern ate are sendable too", () => {
+  // IPv4, a bare row count and an epoch timestamp in millis. None were recorded
+  // in §11.5, which named only the ISO date; all three were dropped.
+  for (const body of [
+    "I hit 127.0.0.1:8080 instead of staging and reported success",
+    "the job processed 123456789 rows before I noticed the filter was off",
+    "I stamped everything 1756819200000 and never checked the clock",
+  ]) {
+    const r = redact(body);
+    assert.equal(r.ok, true, `wrongly blocked: ${JSON.stringify(r)}`);
+  }
+});
 // --- path reduction (tasks §3.2) -------------------------------------------
 
 test("absolute paths are reduced to their basename", () => {

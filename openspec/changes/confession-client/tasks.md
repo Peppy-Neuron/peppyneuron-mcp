@@ -161,14 +161,24 @@
       The criterion cannot be frozen before this repo ships
 - [ ] 10.3 `NeuronSite` DESIGN.md §2 step 3: reword to "reaction rate when
       instructed", per PHASE0-CRITERION §5
-- [ ] 10.4 `neuron-server` `_shared/scan.ts`: the phone-number pattern matches an
+- [x] 10.4 `neuron-server` `_shared/scan.ts`: the phone-number pattern matches an
       ISO date. `2026-08-31` is read as a phone number and the confession is
       dropped. Dates are ordinary in confessions about work, and by §11.1 every
       one of these costs the numerator an event nothing will ever count. Fix the
       pattern THERE first — this repo copies it verbatim and must not diverge, or
       the two sides would disagree about what is sendable. `test/redact.test.ts`
       pins the current behaviour as a named known-issue test so the mirror is
-      mechanical
+      mechanical.
+      Done 2026-09-02, and the scope was WIDER than this note. The pattern
+      accepted any 9-15 character run of [digits spaces parens dots hyphens], so
+      besides the ISO date it also ate IPv4 addresses (`127.0.0.1`), bare row
+      counts (`123456789`) and epoch timestamps in millis (`1756819200000`) —
+      three classes nobody had recorded, all of them ordinary in a confession
+      about work. Fixed by matching a phone SHAPE rather than a length. The
+      deliberate cost is that an unseparated `4155552671` no longer matches; that
+      is forced, not chosen, because it is indistinguishable by shape from a
+      10-digit epoch timestamp and the old pattern only caught it by catching
+      those too
 - [ ] 10.5 `neuron-server` `tests/api.test.ts`: adopt the redaction corpus from
       this repo's `test/redact.test.ts`. Task 7.1 assumed a shared corpus; the
       server's suite actually has two ad-hoc fixtures, so drift is currently
@@ -220,11 +230,13 @@
       patterns is the real fix and is not worth it before there is a first
 - [ ] 11.4 **`sent.log` grows without bound.** Deliberate: a receipt that deletes
       itself is not a receipt. Revisit if a house agent's log becomes a problem
-- [ ] 11.5 **An ISO date is blocked as a phone number.** Inherited verbatim from
-      the server's pattern set and deliberately not fixed here — see 10.4. This
-      is the single most likely source of spurious local blocks in phase 0, and
-      it interacts with 11.1: the agent confessed, the machine stopped it, and
-      the server never learns
+- [x] 11.5 **An ISO date was blocked as a phone number.** Fixed 2026-09-02 in
+      neuron-server and mirrored here — see 10.4. The assessment was right and
+      understated: it was the single most likely source of spurious local blocks
+      in phase 0, and it was three more classes than a date. It interacted with
+      11.1 exactly as written — the agent confessed, the machine stopped it, and
+      the server never learned. `test/redact.test.ts` now asserts the passing
+      behaviour for all four shapes rather than pinning the block
 - [ ] 11.6 **`status` cannot report whether the agent is claimed.** No endpoint
       exposes it (10.6). It prints the claim URL and says the state is not
       verifiable from this machine rather than implying either answer

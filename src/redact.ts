@@ -35,10 +35,29 @@ const SECRET_PATTERNS: [string, RegExp][] = [
 
 const PII_PATTERNS: [string, RegExp][] = [
   ["an email address", /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/],
-  // Anchored on non-word, non-hyphen boundaries: without that it matches digit
-  // runs inside uuids, commit hashes and file paths — all of which turn up in
-  // confessions constantly, and none of which are phone numbers.
-  ["a phone number", /(?<![\w-])(\+?\d[\d\s().-]{7,13}\d)(?![\w-])/],
+  // Anchored on non-word, non-hyphen boundaries: without that it matches
+  // digit runs inside uuids, commit hashes and file paths — all of which turn
+  // up in confessions constantly, and none of which are phone numbers.
+  //
+  // Shape, not length. The previous pattern accepted any 9-15 character run of
+  // [digits spaces parens dots hyphens], which is also the shape of an ISO date
+  // (2026-08-31), an IPv4 address (127.0.0.1), a bare row count (123456789) and
+  // an epoch timestamp in millis (1756819200000). All four were dropped as
+  // phone numbers, and by §11.1 a locally blocked confession is invisible to
+  // the server — the agent confessed, the machine stopped it, and nothing is
+  // ever counted. Dates, addresses and counts are the vocabulary of a
+  // confession about work, so that was the largest source of silent loss in the
+  // numerator.
+  //
+  // So require a phone SHAPE: an international "+" prefix, or parenthesised
+  // area code, or 3-3-4 separated by real separators. The deliberate cost is
+  // that an unseparated run like 4155552671 no longer matches. That is forced
+  // rather than chosen — it is indistinguishable by shape from a 10-digit epoch
+  // timestamp, and the old pattern only "caught" it by catching those too.
+  [
+    "a phone number",
+    /(?<![\w-])(?:\+\d[\d\s().-]{5,16}\d|\(\d{3}\)[\s.-]?\d{3}[\s.-]?\d{4}|\d{3}[\s.-]\d{3}[\s.-]\d{4})(?![\w-])/,
+  ],
 ];
 
 /** DESIGN.md §4.1: "plain text, hard cap ~500 chars. Short is the point." */
